@@ -14,10 +14,11 @@
 * :func:`headline` answers "Is it my network?" for the top bar.
 """
 import logging
+import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from laglens.engine.classify import confidence_band, label_of
+from laglens.engine.classify import COMCAST_HOP_KEYS, confidence_band, label_of
 from laglens.state import Episode, State
 
 log = logging.getLogger("laglens.verdict")
@@ -526,6 +527,9 @@ def truncate_prefix(prefix: Optional[str]) -> Optional[str]:
     return "%s::/64 (truncated)" % kept if kept else prefix
 
 
+_EVIDENCE_LOSS_RX = re.compile(r"\s*(\d+(?:\.\d+)?)% loss")
+
+
 def _loss_pct_for(state: State, ep: Episode, key: str, now: float) -> Optional[float]:
     t = state.target(key)
     if t is None:
@@ -533,13 +537,13 @@ def _loss_pct_for(state: State, ep: Episode, key: str, now: float) -> Optional[f
     t1 = ep.t1 if ep.t1 is not None else now
     samples = [s for s in state.raw_window(t.id, ep.t0, t1 + 0.25) if not s.late]
     if not samples:
-        # fall back to the stored evidence line
+        # fall back to the stored evidence line ("<label>: 12% loss, +3 ms"); the label itself may be an
+        # IPv6 address, so the number is read after the label, never after the first colon
+        label = label_of(t) + ":"
         for line in ep.evidence:
-            if line.startswith(label_of(t)) and "% loss" in line:
-                try:
-                    return float(line.split(":")[1].split("%")[0].strip())
-                except (ValueError, IndexError):
-                    return None
+            if line.startswith(label):
+                m = _EVIDENCE_LOSS_RX.match(line[len(label):])
+                return float(m.group(1)) if m else None
         return None
     return 100.0 * sum(1 for s in samples if s.lost) / len(samples)
 
@@ -598,7 +602,8 @@ def comcast_text(ctx: Any, now: Optional[float] = None, episodes: Optional[List[
             dur = t1 - e.t0
             total_s += dur
             gw_loss = _loss_pct_for(state, e, "gw4", now)
-            hop_loss = _loss_pct_for(state, e, "isp_hop4", now)
+            # the first Comcast hop as probed: IPv4 when it answers, else IPv6 (as the classifier picks it)
+            hop_loss = next((v for v in (_loss_pct_for(state, e, k, now) for k in COMCAST_HOP_KEYS) if v is not None), None)
             inet = [v for v in (_loss_pct_for(state, e, k, now) for k in ("inet4_cf", "inet4_g", "inet6_cf", "inet6_g"))
                     if v is not None]
             inet_loss = (sum(inet) / len(inet)) if inet else None

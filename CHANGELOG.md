@@ -3,6 +3,23 @@
 All notable changes to Lag Lens are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and versions follow SemVer.
 
+## [1.0.14] - 2026-10-12
+
+### Fixed
+- A gateway upload counter that failed a check stays untrusted for the rest of the session. Other devices'
+  traffic can only add to what the counter shows, so an undercount is proof; a later upload that happened to
+  overlap other devices' uploads (85 % of 1 MB on an Arris TG4482A whose self-check had counted 6 %) no
+  longer flips the counter to trusted.
+- A passing check must hold up after taking off what the counter adds on its own while this computer is
+  quiet (other devices' uploads), and the one-time self-check still runs after a passive pass.
+- The Tell-Comcast table read IPv6 targets' loss from the wrong part of the evidence line, showing
+  figures like "2390%" in the internet column. The Comcast hop column now falls back to the IPv6 hop when
+  the IPv4 hop does not answer, instead of "n/a".
+- The load test's download phase moved nothing: speed.cloudflare.com now refuses 100 MB downloads (HTTP 403),
+  so the test asked for 100 MB and was graded on the upload alone. Downloads are now 25 MB requests repeated
+  for the phase; a refused request stops that worker instead of retrying in a tight loop, and a load phase
+  that moves under 1 Mb/s is reported as failed (with the reason, also on the dashboard) and gets no grade.
+
 ## [1.0.13] - 2026-10-11
 
 ### Fixed

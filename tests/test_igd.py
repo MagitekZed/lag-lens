@@ -458,6 +458,77 @@ class UploadCounterVerificationTests(unittest.TestCase):
         self.assertIs(col.trusted, True)
         self.assertIsNone(ctx.state.collector("igd")["reason"])
 
+    def traffic(self, ctx, clk, gw, col, seconds, host_mbps, share, other_bps):
+        """Polls for ``seconds``: this computer sends ``host_mbps`` (the counter sees ``share`` of it) while other
+        devices upload ``other_bps`` bytes/s, all of which the counter sees."""
+        for _ in range(int(seconds / 2)):
+            ctx.state.set_latest("iface", {"tx_mbps": host_mbps, "rx_mbps": 0.1})
+            clk.tick(2.0)
+            gw.sent += int(host_mbps * 1e6 / 8 * 2 * share + other_bps * 2)
+            col.poll_counters()
+
+    def test_a_pass_must_clear_what_other_devices_add(self):
+        # a 40 s passive window that overlaps other devices' uploads: the TG4482A counted 85 % of 1 MB that way
+        def run(share):
+            ctx, clk, gw, col = make()
+            col.discover()
+            col.poll_counters()
+            self.traffic(ctx, clk, gw, col, 60, host_mbps=0.05, share=share, other_bps=30_000)  # quiet: background
+            self.assertIsNone(col.trusted)
+            self.traffic(ctx, clk, gw, col, 2, host_mbps=4.8, share=share, other_bps=30_000)  # 1.2 MB upload
+            self.traffic(ctx, clk, gw, col, 8, host_mbps=0.05, share=share, other_bps=30_000)
+            return col
+        col = run(share=0.05)
+        self.assertGreater(col.verification["ratio"], 0.8)  # raw: looks right...
+        self.assertIsNone(col.trusted)  # ...but nearly all of it was the other devices
+        self.assertIs(run(share=1.0).trusted, True)  # the same household with a counter that adds up
+
+    def test_a_failed_check_is_final_for_the_session(self):
+        uploads = []
+
+        def uploader(n, rate):
+            uploads.append(n)
+            gw.sent += int(n * 0.06)
+            return n
+
+        ctx, clk, gw, col = make(uploader=uploader)
+        col.step()
+        clk.tick(61)
+        col.step()
+        self.assertIs(col.trusted, False)
+        reason = ctx.state.collector("igd")["reason"]
+        self.assertIn("counted only 6%", reason)
+        # a later burst the counter happens to account for changes nothing
+        self.traffic(ctx, clk, gw, col, 4, host_mbps=8.0, share=1.0, other_bps=0)
+        self.traffic(ctx, clk, gw, col, 8, host_mbps=0.05, share=1.0, other_bps=0)
+        self.assertIs(col.trusted, False)
+        self.assertEqual(ctx.state.collector("igd")["reason"], reason)
+        self.assertEqual(col.verification["method"], "self-check")
+        self.assertIs(col._apply_verification(clk.t, 1e6, 1e6, "test"), None)
+        clk.tick(3600)
+        col.step()
+        self.assertEqual(len(uploads), 1)
+
+    def test_a_passive_pass_is_still_re_tested_by_the_self_check(self):
+        uploads = []
+
+        def uploader(n, rate):
+            uploads.append(n)
+            gw.sent += int(n * 0.04)
+            return n
+
+        ctx, clk, gw, col = make(uploader=uploader)
+        col.step()
+        self.traffic(ctx, clk, gw, col, 4, host_mbps=8.0, share=1.0, other_bps=0)
+        self.traffic(ctx, clk, gw, col, 8, host_mbps=0.05, share=1.0, other_bps=0)
+        self.assertIs(col.trusted, True)
+        self.assertEqual(col.verification["method"], "passive")
+        clk.tick(61 - 12)
+        col.step()
+        self.assertEqual(len(uploads), 1)
+        self.assertIs(col.trusted, False)
+        self.assertEqual(col.verification["method"], "self-check")
+
     def test_small_uploads_are_not_judged(self):
         ctx, clk, gw, col = make()
         col.discover()

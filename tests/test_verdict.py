@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from helpers_detection import BEYOND_GW, T0, Session, make_cfg, make_ticker, ntp_row, run_episode  # noqa: E402
 from laglens.engine import verdict as vm  # noqa: E402
-from laglens.state import Episode, Event, Mark  # noqa: E402
+from laglens.state import KIND_ICMP, Episode, Event, Mark, Target  # noqa: E402
 
 
 def ep(eid, t0, dur, cls, conf=0.8, relevant=True, subclass=None, docsis=None, direction="n/a", evidence=None):
@@ -287,6 +287,21 @@ class ComcastTextTests(unittest.TestCase):
         self.assertEqual(cols[4], "0%")
         self.assertGreaterEqual(int(cols[5].rstrip("%")), 90)  # 2 Hz hop: 10 of 11 samples in the window
         self.assertGreaterEqual(int(cols[6].rstrip("%")), 90)
+
+    def test_ipv6_evidence_lines_and_an_ipv6_only_comcast_hop(self):
+        # an older episode (no raw samples left) is read back from its evidence lines, whose IPv6 labels contain
+        # colons; on this line the first Comcast hop answers only over IPv6
+        s = Session(keys=("gw4", "inet4_cf", "inet4_g", "inet6_cf", "inet6_g"))
+        self.addCleanup(s.close)
+        s.state.add_target(Target(id=-1, key="isp_hop6", role="isp_hop", addr="2001:558:aaaa:cccc::3", family=6,
+                                  kind=KIND_ICMP, label="isp_hop6", rate_hz=2.0))
+        s.state.episodes.append(ep("ep-1", T0 + 40, 5, "upstream_delay", direction="upstream", evidence=[
+            "gateway 10.0.0.1: 0% loss, +0 ms", "Comcast hop 2001:558:aaaa:cccc::3: 4% loss, +23 ms",
+            "1.1.1.1: 0% loss, +22 ms", "8.8.8.8: 0% loss, +22 ms",
+            "2606:4700:4700::1111: 2% loss, +11 ms", "2001:4860:4860::8888: 6% loss, +12 ms"]))
+        text = vm.comcast_text(s.ctx, now=T0 + 100, write=False)
+        row = [ln for ln in text.splitlines() if "upstream_delay" in ln][0]
+        self.assertEqual(row.split()[4:7], ["0%", "4%", "2%"])  # gw, Comcast hop (IPv6), internet mean
 
 
 class HeadlineTests(unittest.TestCase):

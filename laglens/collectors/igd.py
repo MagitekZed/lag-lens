@@ -70,8 +70,10 @@ VERIFY_MIN_BYTES = 1_000_000      # passive check: this computer uploaded at lea
 VERIFY_WINDOW_S = 40.0
 VERIFY_QUIET_S = 6.0              # ...and has been quiet since, so the gateway's counter has caught up
 VERIFY_QUIET_MBPS = 0.5
-VERIFY_PASS = 0.8                 # counted share of the known upload (household traffic can only add to it)
-VERIFY_FAIL = 0.5
+VERIFY_PASS = 0.8                 # counted share of the known upload, after taking off the background below
+VERIFY_FAIL = 0.5                 # raw counted share: household traffic can only add to it, so less is proof
+VERIFY_BG_WINDOW_S = 120.0        # background: what the counter adds beyond this computer's own traffic
+VERIFY_BG_MIN_S = 20.0            # ...measured over at least this much quiet time before the upload
 SELFCHECK_DELAY_S = 60.0          # active check this long after discovery (once), unless disabled
 SELFCHECK_BYTES = 1_500_000
 SELFCHECK_RATE_BPS = 3_000_000    # ~12 % of a 25 Mb/s upstream for ~4 s
@@ -379,6 +381,8 @@ class IgdCollector:
         self._host_tx_cum = 0.0
         self._wan_tx_cum = 0.0
         self._vhist: Deque[Tuple[float, float, float, float]] = deque()  # (t, host tx cum, wan tx cum, host Mb/s)
+        self._bg: Deque[Tuple[float, float, float]] = deque()  # (t, wan bytes beyond this computer's, s) while quiet
+        self._miscounted = False  # a check proved the counter misses uploads: final for this session
         self._ready_mono: Optional[float] = None
         self._selfcheck_next: Optional[float] = None
         self._selfcheck_tries = 0
@@ -519,8 +523,9 @@ class IgdCollector:
         if self._next_mappings is None or mono >= self._next_mappings:
             self._next_mappings = mono + self.mappings_interval_s
             self.poll_mappings(now)
-        if (self.verify_upload and self.trusted is None and self._selfcheck_next is not None and mono >= self._selfcheck_next
-                and self._selfcheck_tries < SELFCHECK_MAX_TRIES):
+        # runs after a passive pass too: a passive window can be flattered by other devices' traffic
+        if (self.verify_upload and self.trusted is not False and self._selfcheck_next is not None
+                and mono >= self._selfcheck_next and self._selfcheck_tries < SELFCHECK_MAX_TRIES):
             self.self_check(now)
 
     def _call(self, service: str, action: str, args: Optional[Dict[str, Any]] = None) -> Dict[str, str]:
@@ -566,9 +571,14 @@ class IgdCollector:
             iface = self.state.latest("iface") or {}
             host_rate = iface.get("tx_mbps")
             if isinstance(host_rate, (int, float)):
-                self._host_tx_cum += float(host_rate) * 1e6 / 8.0 * dt_v
+                host_b = float(host_rate) * 1e6 / 8.0 * dt_v
+                self._host_tx_cum += host_b
                 self._wan_tx_cum += d_sent
                 self._vhist.append((now, self._host_tx_cum, self._wan_tx_cum, float(host_rate)))
+                if host_rate < VERIFY_QUIET_MBPS:
+                    self._bg.append((now, d_sent - host_b, dt_v))
+                while self._bg and self._bg[0][0] < now - VERIFY_BG_WINDOW_S:
+                    self._bg.popleft()
         self._prev_sent, self._prev_recv, self._prev_counter_t = sent, recv, now
         self._validate_trust(now)
         self._verify_passive(now)
@@ -602,23 +612,44 @@ class IgdCollector:
             self.state.set_collector(self.name, "ok", trusted=False, reason=NOT_TRUSTED_CHIP, location=self.location)
             log.warning("igd: %s", NOT_TRUSTED_CHIP)
 
-    def _apply_verification(self, now: float, counted: float, known: float, method: str) -> Optional[bool]:
-        """Judge the counter from ``counted`` WAN bytes against a ``known`` upload of this computer."""
+    def _background_bps(self, until: float) -> float:
+        """Bytes/s the upload counter adds beyond this computer's own traffic while it is quiet, measured before
+        ``until`` (other devices' uploads as this counter sees them); 0 until there is enough quiet time to tell."""
+        rows = [r for r in self._bg if r[0] <= until]
+        secs = sum(r[2] for r in rows)
+        if secs < VERIFY_BG_MIN_S:
+            return 0.0
+        return max(0.0, sum(r[1] for r in rows) / secs)
+
+    def _apply_verification(self, now: float, counted: float, known: float, method: str,
+                            background: float = 0.0) -> Optional[bool]:
+        """Judge the counter from ``counted`` WAN bytes against a ``known`` upload of this computer.
+
+        Other devices' traffic can only add to ``counted``, so an undercount is proof, and final for the session.
+        A pass must still hold once ``background`` (what the counter adds on its own in as long) is taken off.
+        """
         if known <= 0:
             return None
+        if self._miscounted:
+            log.info("igd: ignoring a %s check (counted %.0f%% of %.1f MB): an earlier check showed this counter "
+                     "misses uploads", method, counted / known * 100, known / 1e6)
+            return None
         ratio = counted / known
+        net = max(0.0, counted - max(0.0, background)) / known
         self.verification = {"method": method, "ratio": round(ratio, 3), "bytes": int(known), "t": round(now, 3)}
-        if ratio >= VERIFY_PASS:
+        if net >= VERIFY_PASS:
             self.trusted = True
             self.state.set_collector(self.name, "ok", trusted=True, reason=None, location=self.location, verification=self.verification)
             log.info("igd: upload counter verified (%s): counted %.0f%% of %.1f MB", method, ratio * 100, known / 1e6)
         elif ratio < VERIFY_FAIL:
             self.trusted = False
+            self._miscounted = True
             reason = MISCOUNT_REASON % (int(round(ratio * 100)), known / 1e6)
             self.state.set_collector(self.name, "ok", trusted=False, reason=reason, location=self.location, verification=self.verification)
             log.warning("igd: %s (%s check)", reason, method)
         else:
-            log.info("igd: upload counter check inconclusive (%s): counted %.0f%% of %.1f MB", method, ratio * 100, known / 1e6)
+            log.info("igd: upload counter check inconclusive (%s): counted %.0f%% of %.1f MB, %.0f%% beyond the "
+                     "background", method, ratio * 100, known / 1e6, net * 100)
             return None
         self._publish(now)
         return self.trusted
@@ -627,7 +658,7 @@ class IgdCollector:
         """This computer uploaded >= 1 MB recently and has gone quiet: did the gateway count it?"""
         while self._vhist and self._vhist[0][0] < now - VERIFY_WINDOW_S:
             self._vhist.popleft()
-        if len(self._vhist) < 2:
+        if len(self._vhist) < 2 or self._miscounted:
             return
         if any(r[3] >= VERIFY_QUIET_MBPS for r in self._vhist if r[0] >= now - VERIFY_QUIET_S):
             return  # still uploading, or the gateway's counter may not have caught up
@@ -635,7 +666,8 @@ class IgdCollector:
         host = last[1] - first[1]
         if host < VERIFY_MIN_BYTES:
             return
-        self._apply_verification(now, last[2] - first[2], host, "passive")
+        background = self._background_bps(first[0]) * (last[0] - first[0])
+        self._apply_verification(now, last[2] - first[2], host, "passive", background)
         self._vhist.clear()  # judge each burst once
 
     def self_check(self, now: Optional[float] = None) -> Optional[bool]:
@@ -649,10 +681,12 @@ class IgdCollector:
         self._selfcheck_tries += 1
         self._selfcheck_next = mono + SELFCHECK_RETRY_S
         try:
+            t_a = self._clock()
             a = _to_int(self._call(WANCIC, "GetTotalBytesSent").get("NewTotalBytesSent"))
             n = int(self._uploader(SELFCHECK_BYTES, SELFCHECK_RATE_BPS))
             self._sleep(SELFCHECK_SETTLE_S)
             b = _to_int(self._call(WANCIC, "GetTotalBytesSent").get("NewTotalBytesSent"))
+            t_b = self._clock()
         except Exception as exc:  # noqa: BLE001 - offline, endpoint down: try again later
             log.info("igd: upload counter self-check failed (%s); retry in %d min", exc, int(SELFCHECK_RETRY_S // 60))
             return None
@@ -660,7 +694,8 @@ class IgdCollector:
         if delta is None or n <= 0:
             return None
         self._vhist.clear()  # the passive check must not judge the same upload again
-        result = self._apply_verification(self._clock(), float(delta), float(n), "self-check")
+        background = self._background_bps(t_a) * max(0.0, t_b - t_a)
+        result = self._apply_verification(t_b, float(delta), float(n), "self-check", background)
         if result is not None:
             self._selfcheck_next = None
         return result

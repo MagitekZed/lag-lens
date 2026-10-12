@@ -257,6 +257,51 @@ class SequenceTests(unittest.TestCase):
         self.assertEqual(row["phases"]["idle"]["n"], 0)
 
 
+class RefusedTransferTests(unittest.TestCase):
+    def test_a_refused_download_fails_the_phase_and_withholds_the_grade(self):
+        ctx, clk, transfer, test = make()
+
+        def refused(url, stop, on_bytes):
+            raise lt.TransferRefused("speed.cloudflare.com answered HTTP 403 to the download")
+
+        transfer.download = refused
+        row = test.run_sync()
+        self.assertEqual(row["phases"]["down"]["mbps"], 0.0)
+        self.assertIn("HTTP 403", row["phases"]["down"]["failed"])
+        self.assertNotIn("failed", row["phases"]["up"])
+        self.assertEqual(row["added_ms"], {"down": None, "up": 5.0})
+        self.assertIsNone(row["grade"])  # an upload-only result must not pass for the whole test
+        self.assertIn("down phase failed: speed.cloudflare.com answered HTTP 403 to the download; no grade",
+                      lt.format_table(row))
+
+    def test_http_transfer_stops_on_an_http_error(self):
+        class Resp:
+            status = 403
+
+            def read(self, n=-1):
+                return b"x"
+
+        class Conn:
+            requests = 0
+
+            def request(self, *a, **k):
+                Conn.requests += 1
+
+            def getresponse(self):
+                return Resp()
+
+            def close(self):
+                pass
+
+        tr = lt.HttpTransfer()
+        tr._conn = lambda url: (Conn(), "/__down")
+        got = []
+        with self.assertRaises(lt.TransferRefused):
+            tr.download(lt.DOWN_URL, lambda: False, got.append)
+        self.assertEqual((Conn.requests, got), (1, []))  # no tight retry loop against the endpoint
+        self.assertIn("bytes=25000000", lt.DOWN_URL)
+
+
 class LatencySourceTests(unittest.TestCase):
     def test_state_source_uses_reference_targets_only(self):
         st = State(t0=T0, cfg={})

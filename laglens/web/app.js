@@ -31,6 +31,11 @@
     });
   }
   function confClass(c) { return c >= 0.75 ? 'hi' : (c >= 0.5 ? 'mid' : 'lo'); }
+  // why a load test has no grade: its load phases that moved no traffic ("down: … HTTP 403 …")
+  function ltFailed(l) {
+    var p = (l && l.phases) || {};
+    return ['down', 'up'].filter(function (k) { return p[k] && p[k].failed; }).map(function (k) { return k + ': ' + p[k].failed; }).join('; ');
+  }
   function kv(pairs) {
     var dl = h('dl', { class: 'kvlist' });
     pairs.forEach(function (p) { if (p[1] == null || p[1] === '') return; dl.appendChild(h('dt', null, p[0])); dl.appendChild(h('dd', null, p[1])); });
@@ -516,6 +521,7 @@
     b.textContent = lt.running ? ('Load test: ' + (lt.phase || 'running') + ' — stop') : 'Load test';
     b.classList.toggle('on', !!lt.running);
     if (lt.last && lt.last.grade && !lt.running) b.title = 'Last grade ' + lt.last.grade;
+    else if (lt.last && ltFailed(lt.last) && !lt.running) b.title = 'Last load test failed (' + ltFailed(lt.last) + ')';
   };
   D.renderUpdate = function (u) {
     var chip = $('update-chip');
@@ -684,7 +690,7 @@
         break;
       case 'loadtest':
         if (this.state) { this.state.loadtest = Object.assign({}, this.state.loadtest, { running: data.phase != null && data.phase !== 'done', phase: data.phase }); this.renderLoadtest(this.state.loadtest); }
-        if (data.phase === 'done' || data.phase == null) LL.api.get('/api/loadtest').then(function (lt) { self.renderLoadtest(lt); if (lt.last && lt.last.grade) LL.toast('Load test grade ' + lt.last.grade + ' — added up ' + fmt.num(lt.last.added_ms && lt.last.added_ms.up, 0) + ' ms', 'ok', 8000); }).catch(function () { /* ignore */ });
+        if (data.phase === 'done' || data.phase == null) LL.api.get('/api/loadtest').then(function (lt) { self.renderLoadtest(lt); if (lt.last && lt.last.grade) LL.toast('Load test grade ' + lt.last.grade + ' — added up ' + fmt.num(lt.last.added_ms && lt.last.added_ms.up, 0) + ' ms', 'ok', 8000); else if (lt.last && ltFailed(lt.last)) LL.toast('Load test: no grade — ' + ltFailed(lt.last), 'bad', 9000); }).catch(function () { /* ignore */ });
         break;
       case 'verdict':
         if (this.state) this.state.verdict = data;
@@ -987,7 +993,7 @@
     if (!lts.length) sec11.appendChild(h('p', { class: 'muted' }, 'No load test run.'));
     else sec11.appendChild(h('div', { class: 'table-wrap' }, h('table', null, h('thead', null, h('tr', null, ['start', 'grade', 'down Mb/s', 'up Mb/s', 'idle p50/p95', 'down p50/p95', 'up p50/p95', 'added ms down/up'].map(function (x) { return h('th', null, x); }))),
       h('tbody', null, lts.map(function (l) { var p = l.phases || {}; function pp(k) { return p[k] ? fmt.num(p[k].p50, 0) + ' / ' + fmt.num(p[k].p95, 0) : '—'; }
-        return h('tr', null, h('td', null, fmt.clock(l.t0)), h('td', null, l.grade || '—'), h('td', { class: 'num' }, p.down ? fmt.num(p.down.mbps, 0) : '—'), h('td', { class: 'num' }, p.up ? fmt.num(p.up.mbps, 1) : '—'), h('td', null, pp('idle')), h('td', null, pp('down')), h('td', null, pp('up')), h('td', null, l.added_ms ? fmt.num(l.added_ms.down, 0) + ' / ' + fmt.num(l.added_ms.up, 0) : '—')); })))));
+        return h('tr', null, h('td', null, fmt.clock(l.t0)), h('td', ltFailed(l) ? { title: ltFailed(l) } : null, l.grade || (ltFailed(l) ? 'failed' : '—')), h('td', { class: 'num' }, p.down ? fmt.num(p.down.mbps, 0) : '—'), h('td', { class: 'num' }, p.up ? fmt.num(p.up.mbps, 1) : '—'), h('td', null, pp('idle')), h('td', null, pp('down')), h('td', null, pp('up')), h('td', null, l.added_ms ? fmt.num(l.added_ms.down, 0) + ' / ' + fmt.num(l.added_ms.up, 0) : '—')); })))));
     rootEl.appendChild(sec11);
 
     // 12. Doctor / collectors / host / config

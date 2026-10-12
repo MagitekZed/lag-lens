@@ -2,13 +2,14 @@
 
 Each phase lasts ``loadtest.phase_s`` seconds. ``down`` runs
 ``loadtest.threads`` parallel HTTPS GETs of
-``https://speed.cloudflare.com/__down?bytes=100000000`` that are streamed and
-discarded until the phase ends; ``up`` runs parallel POSTs of random bytes
+``https://speed.cloudflare.com/__down?bytes=25000000`` that are streamed,
+discarded and repeated until the phase ends; ``up`` runs parallel POSTs of random bytes
 (8 MB bodies, repeated) to ``https://speed.cloudflare.com/__up``. Per phase
 the throughput (Mb/s) and the latency p50/p95 of the reference targets
 ``inet4_cf`` / ``inet4_g`` (from ``state.raw_window``) are recorded; the grade
 is derived from the added median latency under load: A < 15 ms, B < 40,
-C < 100, D < 250, else F.
+C < 100, D < 250, else F. A load phase that moved less than ``MIN_LOAD_MBPS``
+(the endpoint refused it, say) is marked ``failed`` and the test gets no grade.
 
 The test refuses to start while an episode is open (``EpisodeOpen``) unless
 forced, and while another run is in progress (``LoadTestBusy``). While it
@@ -35,13 +36,15 @@ log = logging.getLogger("laglens.loadtest")
 
 PHASES = ("idle", "down", "up", "recover")
 LOAD_PHASES = ("down", "up")
-DOWN_URL = "https://speed.cloudflare.com/__down?bytes=100000000"
+# speed.cloudflare.com answers 403 for 100 MB downloads (seen 2026-10-12); 25 MB per request is served
+DOWN_URL = "https://speed.cloudflare.com/__down?bytes=25000000"
 UP_URL = "https://speed.cloudflare.com/__up"
 UP_BODY_BYTES = 8 * 1024 * 1024
 CHUNK = 64 * 1024
 HTTP_TIMEOUT_S = 10.0
 REFERENCE_KEYS = ("inet4_cf", "inet4_g")
 GRADES = ((15.0, "A"), (40.0, "B"), (100.0, "C"), (250.0, "D"))
+MIN_LOAD_MBPS = 1.0  # a load phase below this did not load the link: no grade from it
 _PING_TIME_RE = re.compile(r"time[=<]\s*([\d.]+)\s*ms")
 
 
@@ -51,6 +54,10 @@ class LoadTestBusy(Exception):
 
 class EpisodeOpen(Exception):
     """An episode is open; pass ``force=True`` to run anyway."""
+
+
+class TransferRefused(Exception):
+    """The endpoint answered an HTTP error: the worker stops instead of retrying in a tight loop."""
 
 
 def grade_for(added_ms: Optional[float]) -> Optional[str]:
@@ -106,6 +113,9 @@ class HttpTransfer:
             try:
                 conn.request("GET", path, headers={"User-Agent": "LagLens/1.0"})
                 resp = conn.getresponse()
+                if resp.status >= 400:
+                    raise TransferRefused("%s answered HTTP %d to the download" % (urllib.parse.urlsplit(url).hostname,
+                                                                                 resp.status))
                 while not stop():
                     chunk = resp.read(CHUNK)
                     if not chunk:
@@ -139,6 +149,9 @@ class HttpTransfer:
                 if sent >= UP_BODY_BYTES:
                     resp = conn.getresponse()
                     resp.read(4096)
+                    if resp.status >= 400:
+                        raise TransferRefused("%s answered HTTP %d to the upload" % (urllib.parse.urlsplit(url).hostname,
+                                                                                   resp.status))
             except (OSError, http.client.HTTPException) as exc:
                 log.debug("loadtest: upload error: %s", exc)
                 if not stop():
@@ -269,6 +282,7 @@ class LoadTest:
         self.last: Optional[Dict[str, Any]] = None
         self._bytes = 0
         self._bytes_lock = threading.Lock()
+        self._errors: List[str] = []  # this phase's TransferRefused reasons
 
     # ----------------------------------------------------------------- API
     def status(self) -> Dict[str, Any]:
@@ -345,6 +359,12 @@ class LoadTest:
         def body() -> None:
             try:
                 fn(url, stop, self._count)
+            except TransferRefused as exc:
+                with self._bytes_lock:
+                    first = not self._errors
+                    self._errors.append(str(exc))
+                if first:
+                    log.warning("loadtest: %s phase: %s", phase, exc)
             except Exception:  # noqa: BLE001
                 log.debug("loadtest: worker error", exc_info=True)
 
@@ -380,11 +400,14 @@ class LoadTest:
         t1 = self._clock()
         idle_p50 = (phases.get("idle") or {}).get("p50")
         added: Dict[str, Optional[float]] = {}
+        failed = False
         for ph in LOAD_PHASES:
             p50 = (phases.get(ph) or {}).get("p50")
-            added[ph] = round(p50 - idle_p50, 1) if (p50 is not None and idle_p50 is not None) else None
+            failed = failed or bool((phases.get(ph) or {}).get("failed"))
+            ok = p50 is not None and idle_p50 is not None and not (phases.get(ph) or {}).get("failed")
+            added[ph] = round(p50 - idle_p50, 1) if ok else None
         worst = [v for v in added.values() if v is not None]
-        grade = grade_for(max(worst)) if worst and not aborted else None
+        grade = grade_for(max(worst)) if worst and not aborted and not failed else None
         row = {"t0": round(t0, 3), "t1": round(t1, 3), "id": self.id, "phases": phases, "grade": grade, "added_ms": added,
                "aborted": aborted, "phase_s": self.phase_s, "threads": self.threads}
         self.last = row
@@ -402,6 +425,7 @@ class LoadTest:
         end = start + self.phase_s
         with self._bytes_lock:
             self._bytes = 0
+            self._errors = []
         self._set_state(running=True, phase=phase, elapsed_s=round(start - t0, 1), live={"mbps": None, "p95": None})
         try:
             self.state.raise_note("loadtest_phase", t=start, severity=1, note="load test phase %s" % phase, phase=phase, id=self.id)
@@ -434,6 +458,10 @@ class LoadTest:
         if phase in LOAD_PHASES:
             res["mbps"] = round(b * 8.0 / dur / 1e6, 1)
             res["bytes"] = b
+            if res["mbps"] < MIN_LOAD_MBPS:
+                with self._bytes_lock:
+                    errors = list(self._errors)
+                res["failed"] = errors[0] if errors else "no traffic moved"
         res["dur_s"] = round(dur, 1)
         if self._on_phase is not None:
             try:
@@ -476,6 +504,10 @@ def format_table(row: Dict[str, Any]) -> str:
                                                _fmt(r.get("p50")), _fmt(r.get("p95")), r.get("n", 0)))
     added = row.get("added_ms") or {}
     lines.append("added latency under load: down %s ms, up %s ms" % (_fmt(added.get("down")), _fmt(added.get("up"))))
+    for ph in LOAD_PHASES:
+        why = ((row.get("phases") or {}).get(ph) or {}).get("failed")
+        if why:
+            lines.append("%s phase failed: %s; no grade" % (ph, why))
     lines.append("grade: %s%s" % (row.get("grade") or "n/a", " (aborted)" if row.get("aborted") else ""))
     return "\n".join(lines)
 
@@ -524,5 +556,5 @@ def run_cli(cfg: dict, platform: Optional[Any] = None, transfer: Optional[Any] =
     return 0 if row and not row.get("aborted") else 1
 
 
-__all__ = ["LoadTest", "LoadTestBusy", "EpisodeOpen", "HttpTransfer", "PingSampler", "state_latency_source",
+__all__ = ["LoadTest", "LoadTestBusy", "EpisodeOpen", "TransferRefused", "HttpTransfer", "PingSampler", "state_latency_source",
            "grade_for", "latency_summary", "format_table", "run_cli", "PHASES", "DOWN_URL", "UP_URL"]
