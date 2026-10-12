@@ -1,0 +1,1 @@
+[{"dst":"10.0.0.1","dev":"enp3s0","lladdr":"7C:ED:8D:AA:BB:CC","state":["REACHABLE"]},{"dst":"10.0.0.23","dev":"enp3s0","lladdr":"28:16:a8:11:22:33","state":["STALE"]},{"dst":"10.0.0.99","dev":"enp3s0","state":["FAILED"]}]

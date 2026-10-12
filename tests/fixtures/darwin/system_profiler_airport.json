@@ -1,0 +1,30 @@
+{
+  "SPAirPortDataType" : [
+    {
+      "spairport_airport_interfaces" : [
+        {
+          "_name" : "en0",
+          "spairport_airport_other_local_wireless_networks" : [
+            {"_name" : "Neighbor", "spairport_network_channel" : "6 (2GHz, 20MHz)", "spairport_signal_noise" : "-80 dBm / -90 dBm"}
+          ],
+          "spairport_caps_airdrop" : "spairport_caps_supported",
+          "spairport_current_network_information" : {
+            "_name" : "HomeNet5",
+            "spairport_network_channel" : "36 (5GHz, 80MHz)",
+            "spairport_network_country_code" : "US",
+            "spairport_network_mcs" : 9,
+            "spairport_network_phymode" : "802.11ax",
+            "spairport_network_rate" : 866,
+            "spairport_network_type" : "spairport_network_type_station",
+            "spairport_security_mode" : "spairport_security_mode_wpa2_personal",
+            "spairport_signal_noise" : "-58 dBm / -92 dBm"
+          },
+          "spairport_status_information" : "spairport_status_connected",
+          "spairport_supported_channels" : "1, 6, 11, 36, 40, 44, 48",
+          "spairport_supported_phymodes" : "802.11 a/b/g/n/ac/ax"
+        }
+      ],
+      "spairport_software_information" : {"spairport_corewlan_version" : "17.0"}
+    }
+  ]
+}

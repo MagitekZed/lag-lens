@@ -1,0 +1,65 @@
+name: ci
+
+# Public repository: GitHub-hosted runners (Linux and macOS) do not use the account's Actions minutes.
+# If this repository is ever made private again, switch to workflow_dispatch only: macOS bills at 10x.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / py${{ matrix.python }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.9", "3.13"]
+    runs-on: ${{ matrix.os }}
+    env:
+      # macOS runners put Homebrew bash 5 first on PATH; users run the stock
+      # /bin/bash 3.2, so that is what the shell steps use there.
+      SH: ${{ matrix.os == 'macos-latest' && '/bin/bash' || 'bash' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: py_compile laglens
+        run: python -m py_compile $(find laglens -name '*.py')
+
+      - name: start.sh --version
+        run: |
+          "$SH" --version | head -1
+          "$SH" start.sh --version
+
+      - name: start.sh --doctor --no-net
+        run: |
+          "$SH" start.sh --doctor --no-net || true
+
+      - name: build zip (strict)
+        run: python build/make_zip.py --strict --out /tmp/site
+
+      - name: fresh-unzip smoke test
+        run: |
+          set -eu
+          FRESH="$(mktemp -d)"
+          python -m zipfile -e /tmp/site/lag-lens.zip "$FRESH"
+          test -f "$FRESH/lag-lens/start.sh"
+          test -f "$FRESH/lag-lens/VERSION"
+          cd "$FRESH"
+          "$SH" lag-lens/start.sh --version
+          "$SH" lag-lens/start.sh --doctor --no-net || true
+
+      - name: shellcheck
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck
+          shellcheck start.sh get.sh

@@ -1,0 +1,48 @@
+# --- private: never published -------------------------------------------------
+# Build notes, design spec and live-run reports (contain details of a real home network).
+/private/
+# Your settings: may hold the XB7 admin password, the Xbox's address, notification topics.
+/config.json
+config.local.json
+config.*.json
+!config.example.json
+*.secret
+.env
+.env.*
+
+# --- everything Lag Lens writes while it runs ------------------------------------
+# Session folders: probe samples, reports, exports, modem pages, tokens, logs.
+sessions/
+docsis-dump-*/
+xb7_raw/
+laglens-*.zip
+report.html
+comcast_evidence.txt
+*.pid
+*.log
+*.log.*
+# Backups the updater keeps next to an install.
+lag-lens.old-*/
+lag-lens.new-*/
+
+# --- build outputs ----------------------------------------------------------------
+/dist/
+/site/_build/
+*.zip
+!tests/fixtures/**/*.zip
+
+# --- tools and OS -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+node_modules/
+.claude/
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db

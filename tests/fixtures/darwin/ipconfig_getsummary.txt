@@ -1,0 +1,7 @@
+<dictionary> {
+  BSSID : aa:bb:cc:11:22:33
+  InterfaceType : WiFi
+  NetworkID : 8F0B3C2B-0000-0000-0000-000000000000
+  SSID : HomeNet5
+  Security : WPA2_PSK
+}

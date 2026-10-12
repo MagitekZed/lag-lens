@@ -1,0 +1,12 @@
+Connected to 7c:ed:8d:aa:bb:cc (on wlp2s0)
+	SSID: HomeNet5
+	freq: 5180
+	RX: 123456789 bytes (98765 packets)
+	TX: 12345678 bytes (54321 packets)
+	signal: -58 dBm
+	rx bitrate: 866.7 MBit/s VHT-MCS 9 80MHz short GI VHT-NSS 2
+	tx bitrate: 780.0 MBit/s VHT-MCS 8 80MHz short GI VHT-NSS 2
+
+	bss flags:	short-slot-time
+	dtim period:	1
+	beacon int:	100

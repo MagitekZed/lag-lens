@@ -1,0 +1,50 @@
+{
+  "port": 8787,
+  "bind": "0.0.0.0",
+  "rate_hz": 4,
+  "hop_rate_hz": 2,
+  "timeout_ms": 2000,
+  "late_window_ms": 10000,
+  "targets": {
+    "v4": ["1.1.1.1", "8.8.8.8"],
+    "v6": ["2606:4700:4700::1111", "2001:4860:4860::8888"],
+    "xbox_ip": null,
+    "xbox_discovery": true,
+    "ntp": ["time.cloudflare.com", "time.google.com"],
+    "stun": ["stun.cloudflare.com:3478", "stun.l.google.com:19302"],
+    "tcp_names": ["xsts.auth.xboxlive.com", "profile.xboxlive.com", "login.live.com"],
+    "game_endpoints": [],
+    "dns_names": ["xboxlive.com", "hbomax.com", "cloudflare.com"]
+  },
+  "cdn": {
+    "enabled": true,
+    "interval_s": 60,
+    "urls": ["https://speed.cloudflare.com/__down?bytes=262144", "https://www.gstatic.com/generate_204"]
+  },
+  "path": {"discover_interval_s": 1800, "max_ttl": 12, "sweep_on_episode": true},
+  "link": {"up_mbps": 25, "down_mbps": 1000},
+  "docsis": {
+    "url": "http://10.0.0.1",
+    "username": "admin",
+    "password": null,
+    "interval_s": 60,
+    "pages": [
+      "/network_setup.jst", "/connection_status.jst", "/troubleshooting_logs.jst",
+      "/at_a_glance.jst", "/hardware.jst",
+      "/network_setup.jsp", "/connection_status.jsp", "/troubleshooting_logs.jsp"
+    ],
+    "login_paths": ["/check.jst", "/check.jsp"],
+    "save_raw": true
+  },
+  "igd": {"enabled": true, "verify_upload": true, "counter_interval_s": 2, "status_interval_s": 30, "mappings_interval_s": 300},
+  "wifi": {"enabled": "auto", "interval_s": 5},
+  "notify": {"ntfy_topic": null, "webhook_url": null, "min_confidence": "medium", "batch_s": 120},
+  "loadtest": {"enabled": true, "phase_s": 20, "threads": 4, "nightly": false, "nightly_at": "04:00"},
+  "disk": {"session_cap_mb": 500, "total_cap_mb": 2048, "samples_cap_mb": 400, "min_free_mb": 500, "allow_prune": false},
+  "rotate_hours": 24,
+  "warmup_s": 60,
+  "activities": ["idle", "bf6", "rocket_league", "hbo_max", "other"],
+  "update_check": true,
+  "open_browser": true,
+  "label": null
+}

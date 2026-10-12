@@ -1,0 +1,4 @@
+? (10.0.0.1) at 7c:ed:8d:aa:bb:cc on en0 ifscope [ethernet]
+? (10.0.0.23) at 28:16:a8:11:22:33 on en0 ifscope [ethernet]
+? (10.0.0.99) at (incomplete) on en0 ifscope [ethernet]
+? (224.0.0.251) at 1:0:5e:0:0:fb on en0 ifscope permanent [ethernet]

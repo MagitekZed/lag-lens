@@ -1,0 +1,5 @@
+Name       Mtu   Network       Address            Ipkts Ierrs     Ibytes    Opkts Oerrs     Obytes  Coll
+en0        1500  <Link#12>     aa:bb:cc:dd:ee:ff 1234567     3  987654321   234567     5  123456789     7
+en0        1500  fe80::aabb:%e fe80::aabb:ccff:f 1234567     -  987654321   234567     -  123456789     -
+en0        1500  10.0.0.0/24   10.0.0.35         1234567     -  987654321   234567     -  123456789     -
+en0        1500  2601:abcd::/6 2601:abcd:1234:56 1234567     -  987654321   234567     -  123456789     -

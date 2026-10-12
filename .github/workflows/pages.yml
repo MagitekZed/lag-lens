@@ -1,0 +1,95 @@
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Queued runs collapse into the newest one, but a run that is already deploying
+# is never cancelled: actions/deploy-pages interrupted half-way leaves a failed
+# deployment behind (GitHub's own Pages starter workflow does the same).
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  SITE_URL: https://magitekzed.github.io/lag-lens
+  OUT: site/_build
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: unit tests
+        run: python -m unittest discover -s tests
+
+      # The live version.json tells make_zip what the release before this one
+      # is, so the new version.json can carry a `previous` entry for
+      # `start.sh --update --version X` rollback. Nothing live yet (first
+      # deploy) is fine: previous becomes null.
+      - name: fetch the live version.json
+        run: |
+          mkdir -p "$OUT"
+          if ! curl -fsSL --connect-timeout 15 --max-time 60 "$SITE_URL/version.json" -o /tmp/live-version.json; then
+            echo "no live version.json at $SITE_URL (first deploy?)"
+            : > /tmp/live-version.json
+          fi
+
+      # Only the generated files are published: site/index.html.tmpl and
+      # site/.gitignore stay out of the artifact.
+      - name: build zip and site (strict)
+        run: python build/make_zip.py --strict --out "$OUT" --previous /tmp/live-version.json
+
+      # Each deploy replaces the whole site, so the previous release's
+      # versioned zip has to be re-published explicitly to stay downloadable.
+      - name: keep the previous release's zip on the site (rollback)
+        run: |
+          set -eu
+          python - "$OUT" > /tmp/prev.env <<'PY'
+          import json, shlex, sys
+          p = json.load(open(sys.argv[1] + "/version.json")).get("previous") or {}
+          print("PREV_URL=" + shlex.quote(p.get("url", "")))
+          print("PREV_SHA=" + shlex.quote(p.get("sha256", "")))
+          PY
+          . /tmp/prev.env
+          if [ -z "$PREV_URL" ]; then
+            echo "no previous release; nothing to keep"
+            exit 0
+          fi
+          NAME="${PREV_URL##*/}"
+          case "$NAME" in
+            lag-lens-*.zip) ;;
+            *) echo "unexpected previous zip name: $NAME" >&2; exit 1 ;;
+          esac
+          curl -fsSL --connect-timeout 15 --max-time 300 --retry 2 "$PREV_URL" -o "$OUT/$NAME"
+          if [ -n "$PREV_SHA" ]; then
+            echo "$PREV_SHA  $OUT/$NAME" | sha256sum -c -
+          fi
+          ls -l "$OUT"
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/_build
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

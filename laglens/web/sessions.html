@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta name="laglens-token" content="{{TOKEN}}">
+<meta name="laglens-version" content="{{VERSION}}">
+<meta name="laglens-activities" content="{{ACTIVITIES}}">
+<title>Lag Lens — sessions</title>
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/static/style.css?v={{VERSION}}">
+</head>
+<body>
+<header class="topbar">
+  <span class="brand">Lag Lens</span>
+  <span class="muted">Sessions</span>
+  <span class="spacer"></span>
+  <div class="group">
+    <a class="btn small" href="/">Dashboard</a>
+    <a class="btn small" href="/phone">Phone</a>
+    <a class="btn small" href="/setup">Setup</a>
+  </div>
+</header>
+<main class="page">
+  <div class="panel">
+    <h2>Recorded sessions <span class="actions"><button id="btn-refresh" type="button" class="small">Refresh</button></span></h2>
+    <div id="status" class="muted small">loading…</div>
+    <div class="table-wrap">
+      <table class="sessions-table">
+        <thead><tr>
+          <th>start</th><th>label</th><th class="num">duration</th><th class="num">score</th><th class="num">loss</th>
+          <th class="num">p95</th><th class="num">episodes</th><th>top class</th><th>trend</th><th>files</th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="hint" style="margin-top:8px">A static copy of this table is written to <code>sessions/index.html</code> so it works when Lag Lens is not running.</div>
+  </div>
+</main>
+<script src="/static/common.js?v={{VERSION}}"></script>
+<script>
+(function () {
+  'use strict';
+  var LL = window.LL, h = LL.h, $ = LL.$, fmt = LL.fmt;
+  var current = null;
+
+  function row(s) {
+    var isCurrent = current && s.id === current;
+    var tr = h('tr', { class: isCurrent ? 'open' : '' },
+      h('td', null, h('a', { href: '/sessions/' + encodeURIComponent(s.id) + '/report.html' }, fmt.date(s.started)), isCurrent ? h('span', { class: 'small muted' }, ' (running)') : null, h('div', { class: 'small muted mono' }, s.id)),
+      h('td', null, s.label || ''),
+      h('td', { class: 'num' }, s.dur_s != null ? fmt.dur(s.dur_s) : (s.stopped ? '—' : 'running')),
+      h('td', { class: 'num' }, s.score != null ? String(Math.round(s.score)) : '—'),
+      h('td', { class: 'num' + ((s.loss_pct || 0) > 1 ? ' bad' : '') }, fmt.pct(s.loss_pct)),
+      h('td', { class: 'num' }, fmt.ms(s.p95, 1)),
+      h('td', { class: 'num' }, s.episodes != null ? String(s.episodes) : '—'),
+      h('td', null, s.top_class ? fmt.cls(s.top_class) : '—'),
+      h('td', { class: 'spark' }, h('canvas', { width: 120, height: 24 })),
+      h('td', null,
+        h('a', { href: isCurrent ? '/report.html' : '/sessions/' + encodeURIComponent(s.id) + '/report.html', target: '_blank', rel: 'noopener' }, 'report'), ' · ',
+        h('a', { href: isCurrent ? '/export.zip?pack=full&raw=1' : '/sessions/' + encodeURIComponent(s.id) + '/export.zip' }, 'export'), ' · ',
+        h('a', { href: isCurrent ? '/export.zip?pack=comcast' : '/sessions/' + encodeURIComponent(s.id) + '/export.zip?pack=comcast' }, 'comcast pack')));
+    var canvas = tr.querySelector('canvas');
+    if (s.spark && s.spark.length) LL.sparkline(canvas, s.spark, LL.cssVar('--accent') || '#4f8cff');
+    return tr;
+  }
+
+  function load() {
+    var tb = $('rows'), st = $('status');
+    st.textContent = 'loading…';
+    LL.api.get('/api/state').then(function (s) { current = s.session && s.session.id; }).catch(function () { current = null; })
+      .then(function () { return LL.api.get('/api/sessions'); })
+      .then(function (r) {
+        LL.clear(tb);
+        var list = (r.sessions || []).slice().sort(function (a, b) { return (b.started || 0) - (a.started || 0); });
+        list.forEach(function (s) { tb.appendChild(row(s)); });
+        st.textContent = list.length ? list.length + ' session' + (list.length > 1 ? 's' : '') : 'no sessions yet';
+      }).catch(function (e) { st.textContent = 'Cannot list sessions: ' + (e.message || e); });
+  }
+  $('btn-refresh').addEventListener('click', load);
+  load();
+})();
+</script>
+</body>
+</html>

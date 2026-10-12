@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta name="laglens-token" content="{{TOKEN}}">
+<meta name="laglens-version" content="{{VERSION}}">
+<meta name="laglens-activities" content="{{ACTIVITIES}}">
+<meta name="theme-color" content="#0b1020">
+<title>Lag Lens</title>
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/static/uplot.css?v={{VERSION}}">
+<link rel="stylesheet" href="/static/style.css?v={{VERSION}}">
+<script>
+  // Phones get the phone page (SPEC §8.4) unless ?desktop=1 asks for the full dashboard.
+  (function () {
+    try {
+      if (window.innerWidth < 700 && !/[?&]desktop=1/.test(location.search) && !/[?&]phone=/.test(location.search)) {
+        location.replace('/phone');
+      }
+    } catch (e) { /* ignore */ }
+  })();
+</script>
+</head>
+<body>
+<header class="topbar">
+  <span class="brand">Lag Lens</span>
+  <span id="pill" class="pill STARTING">STARTING</span>
+  <div id="dial" class="dial" title="Health"><span id="dial-v">—</span></div>
+  <span id="elapsed" class="elapsed" title="Session elapsed">0 s</span>
+  <span class="url" title="Scan with your phone to open the phone page">
+    <canvas id="qr" width="1" height="1" aria-label="QR code of the phone page"></canvas>
+    <span id="url-text" class="text">http://…:8787</span>
+  </span>
+  <span class="spacer"></span>
+  <div class="group">
+    <button id="btn-lag" type="button" class="danger lag-btn" title="Key: L">Lag happened  (L)</button>
+    <select id="activity-sel" title="What are you doing right now?"><option value="idle">Now: Idle</option></select>
+    <button id="btn-loadtest" type="button" title="Cloudflare down/up load test (~95 s)">Load test</button>
+    <a class="btn" id="a-report" href="/report.html" target="_blank" rel="noopener">Report</a>
+    <a class="btn" id="a-export" href="/export.zip?pack=full&amp;raw=1">Export ZIP</a>
+    <button id="btn-label" type="button" class="small" title="Experiment label for this session">Label</button>
+    <a class="btn small" href="/sessions">Sessions</a>
+    <a class="btn small" href="/setup">Setup</a>
+    <button id="btn-stop" type="button" class="small" title="Stop Lag Lens and write the final report">Stop</button>
+    <span id="update-chip" class="chip update hidden"></span>
+  </div>
+</header>
+<div id="banner" class="banner unreach hidden"></div>
+<div id="disk-banner" class="banner disk hidden"></div>
+<div id="headline" class="headline">Is it my network? <b>Learning your normal…</b></div>
+
+<main class="main">
+  <section class="content" style="min-width:0">
+    <div id="cards" class="cards" aria-label="Targets"></div>
+    <div id="xbox-line" class="small muted" style="margin:6px 0 10px">Xbox: looking…</div>
+    <div id="evidence" class="hidden" aria-live="polite"></div>
+    <div id="chart-tools"></div>
+    <div id="charts" class="charts" aria-label="Timelines"></div>
+  </section>
+
+  <aside class="rail">
+    <div class="panel">
+      <h2>Episodes <span class="small muted">(<span id="ep-count">0</span>)</span></h2>
+      <div class="filters">
+        <select id="ep-class" title="Filter by class"><option value="">all classes</option></select>
+        <select id="ep-conf" title="Minimum confidence">
+          <option value="0">any confidence</option>
+          <option value="0.5">≥ 50%</option>
+          <option value="0.75">≥ 75%</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table class="ep-table">
+          <thead><tr><th>time</th><th class="num">dur</th><th>class</th><th>conf</th></tr></thead>
+          <tbody id="episodes-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Verdict so far <span class="actions"><button id="btn-copy-comcast" type="button" class="small" disabled>Copy for Comcast</button></span></h2>
+      <div id="verdict-text" class="verdict-box">Verdict forms after warm-up.</div>
+      <div id="verdict-top" class="top"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Path <span class="actions"><button id="btn-rediscover" type="button" class="small">Rediscover</button></span></h2>
+      <div id="path-ladder" class="ladder"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Collectors</h2>
+      <div id="collectors"></div>
+    </div>
+
+    <div class="panel">
+      <h2>Doctor <span class="actions"><button id="btn-doctor" type="button" class="small">Re-run</button></span></h2>
+      <div id="doctor"></div>
+    </div>
+
+    <div class="panel">
+      <h2>XB7 modem <span class="actions"><button id="btn-docsis" type="button" class="small">Refresh</button></span></h2>
+      <div id="xb7" class="muted">loading…</div>
+    </div>
+
+    <div class="panel">
+      <h2>IGD (UPnP)</h2>
+      <div id="igd" class="muted">loading…</div>
+    </div>
+
+    <div class="panel small muted">
+      Lag Lens {{VERSION}} · <a href="/phone">phone page</a> · <a href="/sessions">sessions</a> · <a href="/setup">setup</a>
+    </div>
+  </aside>
+</main>
+
+<script src="/static/uplot.js?v={{VERSION}}"></script>
+<script src="/static/qr.js?v={{VERSION}}"></script>
+<script src="/static/common.js?v={{VERSION}}"></script>
+<script src="/static/app.js?v={{VERSION}}"></script>
+</body>
+</html>

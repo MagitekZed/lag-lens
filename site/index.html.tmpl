@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Lag Lens</title>
+<meta name="description" content="Lag Lens is a network-lag witness you run on a computer wired to your Xfinity XB7 while you game. It probes the gateway, the Comcast hops and the internet several times a second, classifies lag episodes, and writes a report you can show Comcast.">
+<link rel="stylesheet" href="style.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='13' fill='none' stroke='%234f8cff' stroke-width='3'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%234f8cff'/%3E%3C/svg%3E">
+</head>
+<body>
+<a class="skip" href="#install">Skip to install</a>
+
+<header class="hero">
+  <div class="wrap">
+    <p class="eyebrow">v{{VERSION}} &middot; built {{BUILT_AT}}</p>
+    <h1><span class="mark" aria-hidden="true"></span>Lag Lens</h1>
+    <p class="lede">
+      A parallel network-lag witness you run on a computer wired to your Xfinity XB7 while you game.
+      It probes the gateway, the Comcast hops and the internet several times a second, detects and
+      classifies lag episodes, and writes a self-contained report you can show Comcast.
+    </p>
+    <p class="hero-actions">
+      <a class="btn primary" href="#install">Install in two commands</a>
+      <a class="btn" href="lag-lens.zip" download>Download lag-lens.zip</a>
+    </p>
+  </div>
+</header>
+
+<main class="wrap">
+
+<section id="install">
+  <h2>Install</h2>
+  <p>Open a terminal on the computer that is plugged into the XB7 and run these two commands.</p>
+
+  <div class="cmd">
+    <div class="cmd-label">1. Download and install to <code>~/lag-lens</code></div>
+    <pre><code id="cmd1">curl -fsSL {{BASE_URL}}/get.sh | sh</code></pre>
+    <button type="button" class="copy" data-copy="cmd1">Copy</button>
+  </div>
+
+  <div class="cmd">
+    <div class="cmd-label">2. Start it</div>
+    <pre><code id="cmd2">cd ~/lag-lens &amp;&amp; bash start.sh</code></pre>
+    <button type="button" class="copy" data-copy="cmd2">Copy</button>
+  </div>
+
+  <p class="muted">
+    The installer verifies the download against its SHA-256 before unpacking, keeps a previous install as
+    <code>~/lag-lens.old</code>, and carries over your <code>config.json</code> and <code>sessions/</code>.
+    No <code>sudo</code>, no <code>pip</code>, nothing is added to your PATH or startup items.
+  </p>
+</section>
+
+<section id="download">
+  <h2>Download</h2>
+  <div class="download-card">
+    <a class="btn primary big" href="lag-lens.zip" download>Download lag-lens.zip</a>
+    <dl class="meta">
+      <dt>Version</dt><dd>{{VERSION}}</dd>
+      <dt>Built</dt><dd>{{BUILT_AT}}</dd>
+      <dt>SHA-256</dt><dd><code class="hash">{{SHA256}}</code></dd>
+    </dl>
+    <p class="muted">Also: <a href="lag-lens.zip.sha256">lag-lens.zip.sha256</a> &middot; <a href="version.json">version.json</a> &middot; <a href="get.sh">get.sh</a></p>
+  </div>
+
+  <h3>Manual install</h3>
+  <ol>
+    <li>Download <code>lag-lens.zip</code> (button above) and unzip it. You get a <code>lag-lens/</code> folder; put it wherever you like, for example your home folder.</li>
+    <li>Optional: check the download. <code>shasum -a 256 lag-lens.zip</code> (macOS) or <code>sha256sum lag-lens.zip</code> (Linux) should print the hash shown above.</li>
+    <li>Open a terminal in that folder and run <code>bash start.sh</code>.</li>
+  </ol>
+</section>
+
+<section id="requirements">
+  <h2>Requirements</h2>
+  <ul class="checks">
+    <li><strong>Linux</strong> (including Bazzite / Fedora, Ubuntu, Debian, Arch) <strong>or macOS</strong>.</li>
+    <li><strong>python3 3.9 or newer</strong>. macOS ships one (run <code>xcode-select --install</code> if asked); Linux distributions include it.</li>
+    <li><strong>No root, no sudo.</strong> Unprivileged ICMP sockets are used; no raw sockets, no capabilities.</li>
+    <li><strong>No pip, no packages.</strong> Standard library only; the dashboard is vanilla HTML and JavaScript served from the zip.</li>
+    <li><strong>A wired connection to the XB7</strong> gives the cleanest evidence. Wi-Fi works, but Wi-Fi noise is then part of what gets measured (and is flagged as such).</li>
+  </ul>
+</section>
+
+<section id="what-you-see">
+  <h2>What you'll see</h2>
+  <div class="grid2">
+    <div>
+      <h3>In the terminal</h3>
+      <p>A quick self-check (which probes work, which gateway was found, whether the XB7 login succeeded), then
+      a one-line status ticker that updates every second: gateway, Comcast hop and internet latency, loss, and
+      the current verdict. The URL of the dashboard is printed next to a QR code so you can open it on your phone.
+      Press <kbd>Enter</kbd> any time lag happens to drop a mark.</p>
+    </div>
+    <div>
+      <h3>In the browser</h3>
+      <p>A dashboard at <code>http://&lt;your-computer&gt;:8787/</code> with live timelines for every target, the
+      path ladder (your PC &rarr; XB7 &rarr; Comcast hops &rarr; internet), episode cards that say <em>where</em>
+      the lag happened and how confident the classification is, and a big <strong>Lag happened</strong> button.
+      A phone-sized page lives at <code>/phone</code>.</p>
+    </div>
+  </div>
+  <p>When you stop (or every 30 seconds while it runs) Lag Lens writes <code>report.html</code>: a single file with
+  the charts, every episode, the XB7 DOCSIS readings, and a plain-English "Tell Comcast" block you can paste into
+  a support chat or hand to a technician.</p>
+</section>
+
+<section id="troubleshooting">
+  <h2>Troubleshooting</h2>
+
+  <details open>
+    <summary>macOS: "gateway unreachable" or everything local fails</summary>
+    <p>macOS blocks local-network access per app. Allow it for your terminal app:
+    <strong>System Settings &rarr; Privacy &amp; Security &rarr; Local Network</strong>, then switch on
+    Terminal (or iTerm, Ghostty, WezTerm, Visual Studio Code, whichever you launched it from). Restart Lag Lens
+    afterwards. The doctor detects this case and tells you which app to allow.</p>
+  </details>
+
+  <details>
+    <summary>Bazzite / Steam Deck style Linux</summary>
+    <ul>
+      <li>Switch to <strong>Desktop Mode</strong>, open Konsole, and run it from <code>~/lag-lens</code> (your home folder is writable and persists across updates; the system image is not).</li>
+      <li>If your phone cannot reach the dashboard, the firewall zone probably blocks port 8787. Either run
+      <code>sudo firewall-cmd --add-port=8787/tcp</code> for this session, or open the port in the zone your
+      Ethernet interface is in. Lag Lens itself never needs root.</li>
+      <li>Keep the screen from sleeping while you monitor; Lag Lens asks the system to inhibit sleep, but a lid close still stops the network.</li>
+    </ul>
+  </details>
+
+  <details>
+    <summary>My phone can't open the dashboard</summary>
+    <ol class="checks">
+      <li>Phone and computer are on the <strong>same Wi-Fi / same network</strong> (not cellular, not a guest network, no VPN on either side).</li>
+      <li>You typed <strong><code>http://</code></strong>, not <code>https://</code>. Browsers upgrade to https silently; Lag Lens serves plain http on your LAN only.</li>
+      <li>The port is <strong>8787</strong> (or the next free one; the terminal prints the exact URL). Try the IP address the terminal shows rather than a hostname.</li>
+      <li>Scan the QR code in the terminal or on the dashboard instead of typing the address.</li>
+      <li>On Linux, check the firewall (see the Bazzite note above). On macOS, if a third-party firewall is installed, allow incoming connections for python3.</li>
+    </ol>
+  </details>
+
+  <details>
+    <summary>It says python3 is too old or missing</summary>
+    <p>Lag Lens needs Python 3.9 or newer. On macOS, <code>xcode-select --install</code> provides it. If you
+    installed a newer Python with Homebrew, <code>start.sh</code> prefers it automatically; you can force one with
+    <code>LAGLENS_PYTHON=/path/to/python3 bash start.sh</code>.</p>
+  </details>
+</section>
+
+<section id="privacy">
+  <h2>Privacy</h2>
+  <p>Nothing phones home. The only traffic Lag Lens generates is the probes it is there to measure: ICMP and TCP
+  to your gateway, the Comcast hops on your path, Cloudflare and Google anycast addresses, Xbox Live sign-in
+  hosts, NTP, and small CDN fetches. There is no telemetry, no account, and no update is ever installed without
+  you running <code>bash start.sh --update</code>.</p>
+  <p>If you let it read your XB7's DOCSIS stats, the gateway password stays in <code>config.json</code> on your
+  machine (file mode 600) and is only ever sent to the gateway itself. It is redacted from logs, the dashboard
+  and the report. Reports and exports are files on your disk; you decide who sees them.</p>
+</section>
+
+<section id="changelog">
+  <h2>What's new in {{VERSION}}</h2>
+  <div class="changelog">
+{{CHANGELOG}}
+  </div>
+</section>
+
+</main>
+
+<footer class="wrap">
+  <p>Lag Lens {{VERSION}} &middot; <a href="lag-lens.zip">lag-lens.zip</a> &middot; <a href="lag-lens.zip.sha256">sha256</a> &middot; <a href="version.json">version.json</a></p>
+</footer>
+
+<script>
+(function () {
+  var buttons = document.querySelectorAll("button.copy");
+  Array.prototype.forEach.call(buttons, function (btn) {
+    btn.addEventListener("click", function () {
+      var el = document.getElementById(btn.getAttribute("data-copy"));
+      var text = el ? el.textContent : "";
+      var done = function (ok) {
+        btn.textContent = ok ? "Copied" : "Press Ctrl/Cmd+C";
+        setTimeout(function () { btn.textContent = "Copy"; }, 1600);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(function () { done(true); }, function () { fallback(); });
+      } else {
+        fallback();
+      }
+      function fallback() {
+        try {
+          var range = document.createRange();
+          range.selectNodeContents(el);
+          var sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(range);
+          done(document.execCommand && document.execCommand("copy"));
+        } catch (e) { done(false); }
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+Global
+         Protocols: LLMNR=resolve -mDNS -DNSOverTLS DNSSEC=no/unsupported
+  resolv.conf mode: stub
+
+Link 2 (enp3s0)
+    Current Scopes: DNS LLMNR/IPv4 LLMNR/IPv6
+         Protocols: +DefaultRoute LLMNR=resolve -mDNS -DNSOverTLS DNSSEC=no/unsupported
+Current DNS Server: 10.0.0.1
+       DNS Servers: 10.0.0.1 2001:558:feed::1
+                    2001:558:feed::2
+        DNS Domain: hsd1.example.comcast.net
+
+Link 3 (wlp2s0)
+    Current Scopes: none
+         Protocols: -DefaultRoute LLMNR=resolve -mDNS -DNSOverTLS DNSSEC=no/unsupported

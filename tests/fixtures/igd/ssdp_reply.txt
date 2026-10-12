@@ -1,0 +1,9 @@
+HTTP/1.1 200 OK
+CACHE-CONTROL: max-age=1800
+DATE: Sat, 11 Oct 2025 21:14:03 GMT
+EXT:
+LOCATION: http://10.0.0.1:49152/rootDesc.xml
+SERVER: Linux/4.19 UPnP/1.1 MiniUPnPd/2.1
+ST: urn:schemas-upnp-org:device:InternetGatewayDevice:1
+USN: uuid:5d5f8a90-2f9e-4f6f-9c57-0123456789ab::urn:schemas-upnp-org:device:InternetGatewayDevice:1
+

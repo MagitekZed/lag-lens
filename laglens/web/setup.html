@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta name="laglens-token" content="{{TOKEN}}">
+<meta name="laglens-version" content="{{VERSION}}">
+<meta name="laglens-activities" content="{{ACTIVITIES}}">
+<title>Lag Lens — setup</title>
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/static/style.css?v={{VERSION}}">
+</head>
+<body>
+<header class="topbar">
+  <span class="brand">Lag Lens</span>
+  <span class="muted">Setup</span>
+  <span class="spacer"></span>
+  <div class="group">
+    <a class="btn small" href="/">Dashboard</a>
+    <a class="btn small" href="/phone">Phone</a>
+    <a class="btn small" href="/sessions">Sessions</a>
+  </div>
+</header>
+<main class="page" style="display:flex;flex-direction:column;gap:16px;max-width:1100px">
+  <div class="panel">
+    <h2>Xbox</h2>
+    <div id="xbox-now" class="muted">loading…</div>
+    <h3 style="margin-top:10px">Candidates (Microsoft MAC prefixes in the neighbour table)</h3>
+    <div id="candidates"><span class="muted">loading…</span></div>
+    <h3 style="margin-top:10px">Or enter the Xbox IP</h3>
+    <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+      <input id="xbox-ip" type="text" inputmode="decimal" placeholder="10.0.0.23" autocomplete="off" style="min-width:200px">
+      <button id="btn-xbox" type="button" class="primary">Use this IP</button>
+      <span id="xbox-msg" class="small muted"></span>
+    </div>
+    <div class="hint" style="margin-top:8px">
+      Find it on the console under Settings → General → Network settings → Advanced settings. Giving the Xbox a DHCP
+      reservation on the XB7 keeps the address stable. The choice is applied immediately and kept in memory for this
+      run; add <code>"targets": {"xbox_ip": "…"}</code> to <code>config.json</code> (or start with <code>--xbox IP</code>) to make it permanent.
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Config hints</h2>
+    <div id="hints"><span class="muted">loading…</span></div>
+  </div>
+
+  <div class="panel">
+    <h2>Doctor <span class="actions"><button id="btn-doctor" type="button" class="small">Re-run</button></span></h2>
+    <div id="doctor-ran" class="small muted"></div>
+    <div id="doctor"><span class="muted">loading…</span></div>
+  </div>
+
+  <div class="panel small muted">Lag Lens {{VERSION}}</div>
+</main>
+<script src="/static/common.js?v={{VERSION}}"></script>
+<script>
+(function () {
+  'use strict';
+  var LL = window.LL, h = LL.h, $ = LL.$, fmt = LL.fmt;
+  var state = null;
+
+  function renderXbox(x, cols) {
+    var now = $('xbox-now'); LL.clear(now);
+    x = x || {};
+    if (x.ip) {
+      now.appendChild(h('div', null, 'Probing ', h('b', { class: 'mono' }, x.ip), ' · state ', h('b', null, x.state || 'unknown'),
+        x.source || x.ip_source ? h('span', { class: 'muted' }, ' · chosen by ' + (x.ip_source || x.source)) : null,
+        x.presence ? h('span', { class: 'muted' }, ' · presence via ' + x.presence) : null));
+    } else {
+      var c = cols && cols.xbox;
+      now.appendChild(h('div', null, 'No Xbox target yet', c && c.reason ? h('span', { class: 'muted' }, ' — ' + c.reason) : null));
+    }
+    var wrap = $('candidates'); LL.clear(wrap);
+    var cands = x.candidates || [];
+    if (!cands.length) { wrap.appendChild(h('div', { class: 'muted' }, 'No candidates found (the console may be off or not in the ARP table yet; it only appears after it has talked to this computer or the gateway).')); return; }
+    cands.forEach(function (c) {
+      var btn = h('button', { type: 'button', class: 'small primary', onclick: function () { setIp(c.ip); } }, 'Use');
+      wrap.appendChild(h('div', { class: 'cand' + (c.oui_match ? ' match' : '') + (x.ip === c.ip ? ' current' : '') },
+        h('span', { class: 'mono' }, c.ip), h('span', { class: 'mac' }, (c.mac || '') + (c.answers_5050 ? ' · answers as an Xbox' : '') + (c.oui_match ? ' · Microsoft OUI' : '')), x.ip === c.ip ? h('span', { class: 'small muted' }, 'current') : btn));
+    });
+  }
+
+  function setIp(ip) {
+    var msg = $('xbox-msg');
+    msg.textContent = 'applying…';
+    LL.api.post('/api/xbox', { ip: ip }).then(function () {
+      msg.textContent = 'Xbox set to ' + ip;
+      LL.toast('Xbox set to ' + ip, 'ok');
+      setTimeout(load, 800);
+    }).catch(function (e) { msg.textContent = e.message || 'failed'; LL.toast(e.message || 'failed', 'bad'); });
+  }
+
+  function renderHints(st) {
+    var wrap = $('hints'); LL.clear(wrap);
+    var ul = h('ul');
+    var cols = st.collectors || {}, host = st.host || {};
+    function li(txt, cls) { ul.appendChild(h('li', { class: cls || '' }, txt)); }
+    Object.keys(cols).sort().forEach(function (name) {
+      var c = cols[name] || {};
+      if (c.status === 'disabled' || c.status === 'degraded') li(name + ': ' + c.status + (c.reason ? ' — ' + c.reason : ''), c.status === 'disabled' ? 'bad' : '');
+    });
+    if (cols.docsis && cols.docsis.status === 'disabled') li('XB7 modem stats are off because no gateway password is set. Open config.json in the Lag Lens folder (next to start.sh), find the "docsis" section and replace null after "password" with your XB7 admin password in quotes, e.g. "password": "your-gateway-password". Keep "username": "admin" unless you changed it on the gateway. Save, then restart Lag Lens (Ctrl-C, bash start.sh). The file is kept private (mode 600) and the password is only ever sent to the XB7 at ' + ((st.config && st.config.docsis && st.config.docsis.url) || 'http://10.0.0.1') + '.');
+    if (host.wifi) li('This computer is on Wi-Fi (' + (host.iface || '') + '). Wired Ethernet gives much cleaner evidence; Wi-Fi drops are tagged and excluded from the Comcast tally.');
+    if (host.vpn_route) li('A VPN/tunnel route is active for internet traffic — probes may be measuring the tunnel, not Comcast.', 'bad');
+    if (host.link_up_mbps) li('Upstream limit assumed ' + host.link_up_mbps + ' Mb/s ("link": {"up_mbps"}); set it to your plan\'s upload speed for correct saturation detection.');
+    if (!(st.xbox && st.xbox.ip)) li('Pick the Xbox above (or run with --xbox IP) so LAN-side faults can be told apart from Comcast ones.');
+    li('Sessions live in sessions/<id>/; the token for shortcuts is sessions/<id>/token. iOS Shortcut / Android widget URL: ' + location.origin + '/mark?src=shortcut&token=' + encodeURIComponent(LL.token || '…') + '&offset_s=0');
+    if (st.update && st.update.available) li('Update ' + st.update.latest + ' available: bash start.sh --update');
+    if (!ul.childNodes.length) li('Nothing to fix: every collector is running.');
+    wrap.appendChild(ul);
+  }
+
+  function renderDoctor(r) {
+    var wrap = $('doctor'); LL.clear(wrap);
+    var checks = (r && r.checks) || [];
+    $('doctor-ran').textContent = r && r.ran_at ? 'ran ' + fmt.date(r.ran_at) : '';
+    if (!checks.length) { wrap.appendChild(h('div', { class: 'muted' }, 'not run yet')); return; }
+    var tb = h('tbody');
+    checks.forEach(function (c) {
+      tb.appendChild(h('tr', null, h('td', { class: c.status }, String(c.status || '').toUpperCase()), h('td', null, c.check), h('td', { class: 'small' }, (c.detail || '') + (c.fallback ? ' → ' + c.fallback : ''))));
+    });
+    wrap.appendChild(h('div', { class: 'table-wrap doctor' }, h('table', null, h('thead', null, h('tr', null, h('th', null, 'status'), h('th', null, 'check'), h('th', null, 'detail'))), tb)));
+  }
+
+  function load() {
+    LL.api.get('/api/state').then(function (st) {
+      state = st;
+      renderXbox(st.xbox, st.collectors);
+      renderHints(st);
+      renderDoctor({ ran_at: null, checks: st.doctor || [] });
+      return LL.api.get('/api/doctor').then(renderDoctor).catch(function () { /* keep the snapshot copy */ });
+    }).catch(function (e) {
+      $('xbox-now').textContent = 'Lag Lens is not reachable: ' + (e.message || e);
+    });
+  }
+  $('btn-xbox').addEventListener('click', function () { var v = ($('xbox-ip').value || '').trim(); if (v) setIp(v); });
+  $('xbox-ip').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); $('btn-xbox').click(); } });
+  $('btn-doctor').addEventListener('click', function () {
+    $('doctor-ran').textContent = 'running…';
+    LL.api.post('/api/doctor/run').then(renderDoctor).catch(function (e) { $('doctor-ran').textContent = e.message || 'failed'; });
+  });
+  load();
+})();
+</script>
+</body>
+</html>

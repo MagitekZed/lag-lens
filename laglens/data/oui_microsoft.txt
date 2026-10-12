@@ -1,0 +1,47 @@
+# Microsoft Corporation OUIs (first three bytes of the MAC address), used only to
+# suggest which LAN neighbour might be the Xbox. Best effort: the user can always
+# set targets.xbox_ip or --xbox explicitly. One prefix per line, upper-case hex,
+# colon separated. Lines starting with # are ignored.
+# Deliberately excluded: 00:15:5D (Hyper-V virtual NICs), 00:0D:3A (Azure VMs).
+00:03:FF
+00:12:5A
+00:17:FA
+00:1D:D8
+00:22:48
+00:25:AE
+00:50:F2
+0C:41:3E
+28:16:A8
+28:18:78
+30:59:B7
+3C:83:75
+48:50:73
+4C:3B:DF
+50:1A:C5
+58:82:A8
+58:A6:39
+60:45:BD
+68:6C:E6
+6C:5D:3A
+70:F8:AE
+74:E5:0B
+78:66:B0
+7C:1E:52
+7C:ED:8D
+84:57:33
+88:7E:25
+94:9A:A9
+98:5F:D3
+98:7A:14
+A0:4A:5E
+B4:AE:2B
+BC:83:85
+C4:9D:ED
+C8:3F:26
+CC:C7:95
+D4:81:D7
+DC:98:40
+E4:F8:9C
+F0:1D:BC
+F4:6A:D7
+F8:A2:D6

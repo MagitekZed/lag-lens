@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<!-- Synthetic page modelled on the Arris TG4482A (Xfinity XB7) RDK-B network_setup.jst seen while LOGGED IN.
+     Values are made up; the structure (rotated tables with a title row, an unused channel "0" column,
+     an OFDM column with units in the cells, a separate codeword table, the user toolbar with a Logout
+     link, the inactivity timer and the i18n strings) mirrors the real page. -->
+<html><head><title>XFINITY</title>
+<script type="text/javascript">
+$.i18n().load( { it: { "Please Login First!":"Per procedere, effettua l'accesso", "Access Denied!":"Accesso Negato" } } );
+var jsInactTimeout = parseInt("840") * 1000;
+// var h_timer = setTimeout('alert("You are being logged out due to inactivity."); location.href="home_loggedout.jst";', jsInactTimeout);
+var h_timer = null;
+function countDown(cnt){ if (cnt<=0) { alertLocale("You have been logged out due to inactivity!"); location.href="home_loggedout.jst"; } }
+</script>
+</head><body>
+<ul id="userToolbar" class="on"> <li class="first-child"><span id="hiloc">Hi </span>admin</li>
+<li style="list-style:none outside none; margin-left:0">&nbsp;&nbsp;&#8226;&nbsp;&nbsp;<a href="home_loggedout.jst" tabindex="0" id="logout">Logout</a></li>
+<li style="list-style:none outside none; margin-left:0">&nbsp;&nbsp;&#8226;&nbsp;&nbsp;<a href="password_change.jst" tabindex="0">Change Password</a></li></ul>
+<div class="form-row "> <span class="readonlyLabel">System Uptime:</span> <span class="value"> 4 days 22h: 13m: 3s </span> </div>
+<div class="module" style="overflow:auto"> <table class="data" cellspacing="0" cellpadding="0"> <thead> <tr>
+<td class="row-label acs-th"><div style="width: 100px">Downstream</div></td> <td class="row-label acs-th" colspan="7">Channel Bonding Value</td>
+</tr> </thead> <tbody>
+<tr class=""> <th class="row-label ">Channel ID</td> <td><div style="width: 100px">9</div></td><td><div style="width: 100px">10</div></td><td><div style="width: 100px">0</div></td><td><div style="width: 100px">193</div></td> </tr>
+<tr class=""> <th class="row-label ">Lock Status</td> <td><div style="width: 100px">Locked</div></td><td><div style="width: 100px">Locked</div></td><td><div style="width: 100px"></div></td><td><div style="width: 100px">Locked</div></td> </tr>
+<tr class=""> <th class="row-label ">Frequency</td> <td><div style="width: 100px">393000000</div></td><td><div style="width: 100px">399000000</div></td><td><div style="width: 100px"></div></td><td><div style="width: 100px">599800000</div></td> </tr>
+<tr class=""> <th class="row-label ">SNR</td> <td><div style="width: 100px">37.355988</div></td><td><div style="width: 100px">37.636276</div></td><td><div style="width: 100px"></div></td><td><div style="width: 100px">39.64 dB</div></td> </tr>
+<tr class=""> <th class="row-label ">Power Level</td> <td><div style="width: 100px">5.699997</div></td><td><div style="width: 100px">6.000000</div></td><td><div style="width: 100px"></div></td><td><div style="width: 100px">7.400002 dBmV</div></td> </tr>
+<tr class=""> <th class="row-label ">Modulation</td> <td><div style="width: 100px">QAM256</div></td><td><div style="width: 100px">QAM256</div></td><td><div style="width: 100px"></div></td><td><div style="width: 100px">OFDM</div></td> </tr>
+</tbody> </table> </div>
+<div class="module" style="overflow:auto"> <table class="data" cellspacing="0" cellpadding="0"> <thead> <tr>
+<td class="row-label acs-th"><div style="width: 100px">Upstream</div></td> <td class="row-label acs-th" colspan="7">Channel Bonding Value</td>
+</tr> </thead> <tbody>
+<tr class=""> <th class="row-label ">Channel ID</td> <td><div style="width: 100px">4</div></td><td><div style="width: 100px">1</div></td> </tr>
+<tr class=""> <th class="row-label ">Lock Status</td> <td><div style="width: 100px">Locked</div></td><td><div style="width: 100px">Locked</div></td> </tr>
+<tr class=""> <th class="row-label ">Frequency</td> <td><div style="width: 100px">35600000</div></td><td><div style="width: 100px">16400000</div></td> </tr>
+<tr class=""> <th class="row-label ">Symbol Rate</td> <td><div style="width: 100px">5120</div></td><td><div style="width: 100px">5120</div></td> </tr>
+<tr class=""> <th class="row-label ">Power Level</td> <td><div style="width: 100px">41.010300</div></td><td><div style="width: 100px">39.770599</div></td> </tr>
+<tr class=""> <th class="row-label ">Modulation</td> <td><div style="width: 100px">64QAM</div></td><td><div style="width: 100px">64QAM</div></td> </tr>
+<tr class=""> <th class="row-label ">Channel Type</td> <td><div style="width: 100px">US_TYPE_ATDMA</div></td><td><div style="width: 100px">US_TYPE_ATDMA</div></td> </tr>
+</tbody> </table> </div>
+<div class="module" style="overflow:auto"> <table class="data" cellspacing="0" cellpadding="0"> <thead> <tr>
+<td class="row-label acs-th" colspan="4">CM Error Codewords</td>
+</tr> </thead> <tbody>
+<tr class=""> <th class="row-label ">Channel ID</td> <td><div style="width: 100px">9</div></td><td><div style="width: 100px">10</div></td><td><div style="width: 100px">0</div></td> </tr>
+<tr class=""> <th class="row-label ">Unerrored Codewords</td> <td><div style="width: 100px">2155900450</div></td><td><div style="width: 100px">2155900395</div></td><td><div style="width: 100px">0</div></td> </tr>
+<tr class=""> <th class="row-label ">Correctable Codewords</td> <td><div style="width: 100px">0</div></td><td><div style="width: 100px">21</div></td><td><div style="width: 100px">0</div></td> </tr>
+<tr class=""> <th class="row-label ">Uncorrectable Codewords</td> <td><div style="width: 100px">3</div></td><td><div style="width: 100px">0</div></td><td><div style="width: 100px">0</div></td> </tr>
+</tbody> </table> </div>
+</body></html>

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<meta name="laglens-token" content="{{TOKEN}}">
+<meta name="laglens-version" content="{{VERSION}}">
+<meta name="laglens-activities" content="{{ACTIVITIES}}">
+<meta name="theme-color" content="#0b1020">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Lag Lens">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="application-name" content="Lag Lens">
+<meta name="format-detection" content="telephone=no">
+<title>Lag Lens — phone</title>
+<link rel="icon" href="/favicon.ico">
+<link rel="apple-touch-icon" href="/favicon.ico">
+<link rel="stylesheet" href="/static/uplot.css?v={{VERSION}}">
+<link rel="stylesheet" href="/static/style.css?v={{VERSION}}">
+</head>
+<body class="phone">
+<button id="phone-btn" type="button" class="phone-btn" aria-label="Lag happened">
+  LAG HAPPENED
+  <small id="phone-btn-sub">tap when the game stutters</small>
+</button>
+
+<main class="phone-body">
+  <div id="assess" class="panel assess hidden" aria-live="assertive"></div>
+  <div id="banner" class="banner unreach hidden"></div>
+
+  <div class="panel">
+    <div class="toggle-row">
+      <span id="pill" class="pill STARTING">STARTING</span>
+      <span id="elapsed" class="elapsed small">0 s</span>
+    </div>
+    <div id="headline" class="headline" style="padding:8px 0 0">Is it my network? <b>Learning your normal…</b></div>
+  </div>
+
+  <div id="bignums" class="bignums" aria-label="5 minute loss and p95"></div>
+
+  <div class="panel chart">
+    <div class="title"><span>Latency (p50, last 10 min)</span><span id="chart-legend" class="legend"></span></div>
+    <div id="chart"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Last episodes</h2>
+    <div class="table-wrap">
+      <table class="ep-table"><tbody id="episodes-body"></tbody></table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Now</h2>
+    <div id="activity-row" class="row sheet-row" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+  </div>
+
+  <div class="panel">
+    <div class="toggle-row">
+      <label><input id="pager-toggle" type="checkbox" checked> Pager: vibrate + beep on episodes</label>
+      <label><input id="awake-toggle" type="checkbox" checked> Keep screen awake</label>
+    </div>
+    <div class="hint" id="pager-hint">Sounds start after your first tap on this page (browser rule).</div>
+  </div>
+
+  <div class="panel links small">
+    <a href="/?desktop=1">Dashboard</a>
+    <a id="a-report" href="/report.html" target="_blank" rel="noopener">Report</a>
+    <a id="a-export" href="/export.zip?pack=full&amp;raw=1">Export ZIP</a>
+    <a href="/sessions">Sessions</a>
+    <span class="muted">Lag Lens {{VERSION}}</span>
+  </div>
+</main>
+
+<video id="keep-awake" class="keep-awake" muted playsinline loop aria-hidden="true"></video>
+
+<script src="/static/uplot.js?v={{VERSION}}"></script>
+<script src="/static/common.js?v={{VERSION}}"></script>
+<script src="/static/phone.js?v={{VERSION}}"></script>
+</body>
+</html>

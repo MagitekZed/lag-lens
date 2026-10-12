@@ -1,0 +1,4 @@
+PING6(56=40+8+8 bytes) 2601:abcd:4321:abe0:1111:2222:3333:4444 --> 2606:4700:4700::1111
+
+--- 2606:4700:4700::1111 ping6 statistics ---
+1 packets transmitted, 0 packets received, 100.0% packet loss

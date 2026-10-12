@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en" data-static="1">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="laglens-static" content="1">
+<title>{{TITLE}}</title>
+<style>
+{{UPLOT_CSS}}
+</style>
+<style>
+{{STYLE}}
+</style>
+</head>
+<body class="static-report">
+<noscript>
+  <div class="panel" style="margin:16px"><h2>Lag Lens report</h2>
+  <p>This report needs JavaScript to render its charts and tables. The raw data is embedded in
+  the <code>laglens-data</code> script element of this file.</p></div>
+</noscript>
+<div id="report" class="report"><p class="muted">Rendering report…</p></div>
+<script id="laglens-data" type="application/json">{{DATA_JSON}}</script>
+<script>
+{{UPLOT_JS}}
+</script>
+<script>
+{{COMMON_JS}}
+</script>
+<script>
+{{APP_JS}}
+</script>
+</body>
+</html>
