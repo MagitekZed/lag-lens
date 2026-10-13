@@ -183,7 +183,7 @@ class LiveBlobTests(unittest.TestCase):
         m = self.blob["methodology"]
         self.assertGreaterEqual(len(m), 10)
         text = " ".join(m)
-        self.assertIn("ICMP to the XB7 is answered by its CPU", text)
+        self.assertIn("ICMP to the gateway is answered by its CPU", text)
         self.assertIn("Hop loss alone is not evidence", text)
         self.assertIn("parallel witness", text)
         c = self.fx.state.collector("report")

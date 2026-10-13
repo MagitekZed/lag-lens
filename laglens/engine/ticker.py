@@ -257,11 +257,11 @@ class Ticker:
             status, pill = STATUS_GAP, "Monitor paused/resumed"
         elif open_ep is not None:
             status = STATUS_TROUBLE
-            pill = "Trouble now: %s" % TROUBLE_PHRASES.get(open_ep.cls, TROUBLE_PHRASES["unknown"])
+            pill = "Trouble now: %s" % st.gw_text(TROUBLE_PHRASES.get(open_ep.cls, TROUBLE_PHRASES["unknown"]))
         elif recent is not None:
             ago = max(0, int((now - (recent.t1 or now)) // 60))
             status = STATUS_RECENT
-            where = RECENT_PHRASES.get(recent.cls, RECENT_PHRASES["unknown"])
+            where = st.gw_text(RECENT_PHRASES.get(recent.cls, RECENT_PHRASES["unknown"]))
             pill = "Trouble %s ago: %s" % ("%d min" % ago if ago >= 1 else "moments", where)
         elif elapsed < self.warmup_s:
             status, pill = STATUS_WARMUP, "Learning your normal… %d s" % int(math.ceil(self.warmup_s - elapsed))

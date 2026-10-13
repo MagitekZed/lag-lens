@@ -125,7 +125,7 @@ NEXT_STEPS: Dict[str, List[dict]] = {
          "refute_if": "their upstream checks are clean and the episodes continue"},
     ],
     "ipv6_only": [
-        {"try": "Run 2 h with IPv6 disabled on the XB7 (or Xbox behind the Archer with IPv6 off)",
+        {"try": "Run 2 h with IPv6 disabled on the XB7",
          "confirm_if": "the lag presses stop while IPv4 keeps working",
          "refute_if": "episodes continue on IPv4 alone"},
     ],
@@ -293,6 +293,28 @@ def sentence_what(state: State, episodes: List[Episode], now: float) -> str:
         kind = "short burst" if longest < 30 else "episode"
     return "Over %s your connection %s in %d %s totalling %s." % (elapsed, verb, n, kind, fmt_seconds(total))
 
+
+# "xb7_gateway" when the gateway is a router of the user's own (the XB7 in bridge mode behind it)
+ROUTER_GATEWAY_STEPS = [
+    {"try": "Power-cycle your router once and run 24 h; check its uptime or log for reboots",
+     "confirm_if": "router reboots line up with the outages",
+     "refute_if": "the router stays up through the outages"},
+    {"try": "Update the router's firmware, or swap in another router for a session",
+     "confirm_if": "the gateway-lost outages stop",
+     "refute_if": "the same pattern continues with the other router"},
+]
+
+
+def next_steps(cls: str, state: Optional[State] = None) -> List[dict]:
+    """The experiments for ``cls``, with the gateway named for this network."""
+    if cls == "none":
+        return []
+    if cls == "xb7_gateway" and state is not None and not state.gateway_is_modem():
+        return [dict(s) for s in ROUTER_GATEWAY_STEPS]
+    steps = NEXT_STEPS.get(cls) or NEXT_STEPS["unknown"]
+    if state is None:
+        return [dict(s) for s in steps]
+    return [{k: state.gw_text(v) if isinstance(v, str) else v for k, v in s.items()} for s in steps]
 
 def sentence_where(cls: str, band: str, episodes: List[Episode], top: List[dict], now: float,
                    loss_dominant: bool = True) -> str:
@@ -488,12 +510,12 @@ def compute_verdict(ctx: Any, now: Optional[float] = None) -> dict:
         mean_conf = (sum(confs) / len(confs)) if confs else 0.0
         band = confidence_band(mean_conf) if episodes else "low"
         s1 = sentence_what(state, episodes, now)
-        s2 = sentence_where(cls, band, episodes, top, now,
-                            loss_dominant=_loss_dominant([e for e in episodes if e.cls == cls] or episodes, state))
+        s2 = state.gw_text(sentence_where(cls, band, episodes, top, now,
+                                          loss_dominant=_loss_dominant([e for e in episodes if e.cls == cls] or episodes, state)))
         s3, total_marks, linked_marks = sentence_marks(state)
         findings = persistent_findings(ctx, episodes, now)
         text = " ".join([s1, s2, s3] + findings)
-        nxt = list(NEXT_STEPS.get(cls, NEXT_STEPS["unknown"] if cls != "none" else []))[:3]
+        nxt = next_steps(cls, state)[:3]
         comcast = comcast_text(ctx, now=now, episodes=episodes)
         verdict = {
             "text": text,
@@ -571,7 +593,14 @@ def comcast_text(ctx: Any, now: Optional[float] = None, episodes: Optional[List[
     now = state.now() if now is None else now
     try:
         eps = episodes if episodes is not None else counted_episodes(state, now)
-        relevant = [e for e in eps if e.comcast_relevant and e.cls not in EXCLUDED_FROM_TALLY]
+        is_modem = state.gateway_is_modem()
+        # only episodes that point past the modem: not the home's equipment (incl. a router of the user's own),
+        # not one far-away destination, not unclassified
+        comcast_side = set(COMCAST_CLASSES) | {"upstream_delay"}
+        if not is_modem:
+            comcast_side.discard("xb7_gateway")
+        counted = [e for e in eps if e.cls not in EXCLUDED_FROM_TALLY]
+        relevant = [e for e in counted if e.comcast_relevant and e.cls in comcast_side]
         host = dict(state.host)
         docsis = state.latest("docsis") or {}
         wan = state.latest("wan") or {}
@@ -589,10 +618,20 @@ def comcast_text(ctx: Any, now: Optional[float] = None, episodes: Optional[List[
         lines: List[str] = []
         lines.append("Lag Lens evidence for Comcast — session %s (%s → %s local)" % (
             state.session_id or "?", local_date(state.t0), local_date(now)))
-        lines.append("Gateway: %s %s%s | WAN IP: %s | IPv6 prefix: %s | Probe host: %s (%s)" % (
-            model, gw, (" firmware %s" % fw) if fw else "", wan_ip, prefix, host.get("hostname") or "?", link.strip()))
+        if is_modem:
+            gw_desc = "Gateway: %s %s%s" % (model, gw, (" firmware %s" % fw) if fw else "")
+        else:
+            router = igd.get("model")
+            gw_desc = "Router (customer-owned): %s%s | Modem: %s in bridge mode%s" % (
+                gw, (" %s" % router) if router else "", model, (" firmware %s" % fw) if fw else "")
+        lines.append("%s | WAN IP: %s | IPv6 prefix: %s | Probe host: %s (%s)" % (
+            gw_desc, wan_ip, prefix, host.get("hostname") or "?", link.strip()))
         lines.append("")
-        lines.append("Episodes (local time; only those not explained by equipment in this home): %d" % len(relevant))
+        lines.append("Episodes pointing at Comcast's side (local time): %d" % len(relevant))
+        left_out = len(counted) - len(relevant)
+        if left_out:
+            lines.append("(%d other episode%s left out: this home's equipment, a single far-away destination, or unclear)"
+                         % (left_out, "" if left_out == 1 else "s"))
         lines.append("%-9s %-8s %-26s %-8s %-12s %-9s %-10s %s" % (
             "time", "dur", "class", "gw loss", "Comcast hop", "internet", "direction", "DOCSIS"))
         total_s = 0.0
@@ -627,22 +666,30 @@ def comcast_text(ctx: Any, now: Optional[float] = None, episodes: Optional[List[
                          if isinstance(r.get("docsis"), dict))
             snr = docsis.get("ds_snr_min")
             usp = docsis.get("us_pwr_max")
-            lines.append("DOCSIS snapshot: min DS SNR %s, max US power %s, Σ uncorrectables +%d, T3 ×%d, T4 ×%d, reboots %d" % (
+            # T3/T4 come from the modem's event log; firmware that hides it from the admin login shows none,
+            # which must not read as "no timeouts"
+            log_hidden = docsis.get("log_lines_seen") == 0
+            timeouts = ("T3/T4 not visible (the modem hides its event log from the customer login)" if log_hidden
+                        else "T3 ×%d, T4 ×%d" % (t3, t4))
+            lines.append("DOCSIS snapshot: min DS SNR %s, max US power %s, Σ uncorrectables +%d, %s, reboots %d" % (
                 ("%.1f dB" % float(snr)) if snr is not None else "n/a",
-                ("%.1f dBmV" % float(usp)) if usp is not None else "n/a", uncorr, t3, t4, reboots))
+                ("%.1f dBmV" % float(usp)) if usp is not None else "n/a", uncorr, timeouts, reboots))
             off = docsis.get("log_clock_offset_s")
-            if isinstance(off, (int, float)) and not isinstance(off, bool):
+            if isinstance(off, (int, float)) and not isinstance(off, bool) and not log_hidden:
                 lines.append("XB7 log clock offset: %+d s (log timestamps vs this computer)" % int(round(off)))
         else:
             lines.append("DOCSIS snapshot: not collected (XB7 login not configured)")
         lines.append("")
         if relevant:
-            what = ("dropped packets at the same moments" if any_loss
+            what = ("slowed down or dropped packets at the same moments" if any_loss
                     else "slowed down at the same moments (latency rose, no packets were lost)")
-            lines.append("Request: in these %d episode%s (%s in total) the gateway answered normally while the first Comcast hop "
-                         "and the internet targets %s. Please check the upstream SNR/power at "
-                         "the CMTS for this modem and the node utilization 19:00–23:00." % (
-                             len(relevant), "" if len(relevant) == 1 else "s", fmt_seconds(total_s), what))
+            up = sum(1 for e in relevant if e.direction == "upstream")
+            direction = (" The extra delay was in the upload direction in %d of them." % up) if up * 2 > len(relevant) else ""
+            lines.append("Request: in these %d episode%s (%s in total) the %s answered normally while the first Comcast hop "
+                         "and the internet targets %s.%s Please check the upstream SNR/power at "
+                         "the CMTS for this modem, its T3 timeouts and the node utilization 19:00–23:00." % (
+                             len(relevant), "" if len(relevant) == 1 else "s", fmt_seconds(total_s),
+                             "gateway" if is_modem else "customer router and the modem", what, direction))
         else:
             lines.append("Request: no Comcast-side episode recorded yet; keep this file for reference.")
         text = "\n".join(lines) + "\n"
@@ -664,6 +711,15 @@ def comcast_text(ctx: Any, now: Optional[float] = None, episodes: Optional[List[
 # ---------------------------------------------------------------------------
 def headline(ctx: Any, now: Optional[float] = None) -> dict:
     """``{"answer": yes_comcast|yes_home|no_sign|unknown, "text", "action"}`` for the top bar."""
+    out = _headline(ctx, now)
+    state: State = ctx.state
+    try:
+        return dict(out, text=state.gw_text(out.get("text") or ""), action=state.gw_text(out.get("action") or ""))
+    except Exception:  # noqa: BLE001
+        return out
+
+
+def _headline(ctx: Any, now: Optional[float] = None) -> dict:
     state: State = ctx.state
     now = state.now() if now is None else now
     cfg = getattr(ctx, "cfg", None) or {}
@@ -684,8 +740,10 @@ def headline(ctx: Any, now: Optional[float] = None) -> dict:
             return {"answer": "no_sign", "text": "No sign of it yet", "action": "Keep running"}
         band = state.verdict.get("confidence", "low") if isinstance(state.verdict, dict) else "low"
         qual = {"high": "Yes", "medium": "Probably yes", "low": "Possibly"}.get(band, "Probably yes")
-        nxt = NEXT_STEPS.get(cls) or NEXT_STEPS["unknown"]
+        nxt = next_steps(cls, state)
         action = nxt[0]["try"] if nxt else "Keep running"
+        if cls == "xb7_gateway" and not state.gateway_is_modem():
+            return {"answer": "yes_home", "text": "%s — your home (your router)" % qual, "action": action}
         if cls in COMCAST_CLASSES:
             where = {"docsis_access": "Comcast side (cable line)", "comcast_network": "Comcast side (network)",
                      "xb7_gateway": "Comcast side (XB7 gateway)"}[cls]

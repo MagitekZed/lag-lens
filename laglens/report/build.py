@@ -92,7 +92,7 @@ TEMPLATE_FILE = "report_template.html"
 GZ_CHUNK = 256 * 1024
 
 METHODOLOGY: List[str] = [
-    "Probes: ICMP echo at 4 Hz on a shared 250 ms slot grid to the gateway (XB7), the first Comcast hop, "
+    "Probes: ICMP echo at 4 Hz on a shared 250 ms slot grid to the gateway (the XB7, or your own router), the first Comcast hop, "
     "a mid-path hop and Cloudflare/Google anycast over IPv4 and IPv6; plus NTP, DNS, TCP connect and CDN fetch "
     "probes at lower rates. A probe is 'lost' after timeout_ms (2 s) and 'late' if the reply arrives within "
     "late_window_ms (10 s) after that; late replies never count as lost.",
@@ -111,7 +111,7 @@ METHODOLOGY: List[str] = [
     "Classification rules run in a fixed order (first match wins) and attach a confidence; the rejected "
     "alternative is kept with the reason. Episodes overlapping host_stall / monitor_gap / wifi_drop / "
     "iface_errors / link_flap / self_load / vpn_route / clock_jump are tagged and excluded from the Comcast tally.",
-    "ICMP to the XB7 is answered by its CPU, not by its forwarding path: a slow or lost gateway reply with clean "
+    "ICMP to the gateway is answered by its CPU, not by its forwarding path: a slow or lost gateway reply with clean "
     "deeper targets is reported as xb7_cpu_only, not as a LAN fault.",
     "The parallel witness (NTP direction, IGD WAN counters, DOCSIS log) cannot see the Xbox's own packets; "
     "the Xbox LAN probe only shows whether the console answers on the LAN, not whether its game traffic made it "
@@ -125,7 +125,7 @@ METHODOLOGY: List[str] = [
     "Session verdict: per class the sum of duration x confidence over episodes >= 1.5 s; a class with >= 60% share "
     "is the headline, otherwise 'mixed'. Marks: a 'Lag happened' press links to an episode within its window; "
     "fewer than 50% linked marks adds a warning that the probe could not see most presses.",
-    "Limitations: unprivileged ICMP sockets; a single vantage point behind the XB7; no view of the Xbox's own "
+    "Limitations: unprivileged ICMP sockets; a single vantage point behind the gateway; no view of the Xbox's own "
     "game flows; loss on anycast targets can be the anycast site, not the path; report series beyond 6 h are "
     "folded to 15 s windows and raw samples are only embedded around the newest 60 episodes/marks.",
 ]

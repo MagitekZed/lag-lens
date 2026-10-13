@@ -788,7 +788,8 @@ class IgdCollector:
         return {"rx_mbps": self.rx_mbps, "tx_mbps": self.tx_mbps, "trusted": self.trusted, "verification": self.verification,
                 "uptime_s": self.uptime_s,
                 "rx_pegged": self.rx_pegged, "tx_pegged": self.tx_pegged,
-                "ext_ip": self.ext_ip, "status": self.conn_status, "mappings": list(self.mappings), "t": round(now, 3)}
+                "ext_ip": self.ext_ip, "status": self.conn_status, "mappings": list(self.mappings),
+                "model": (self.device or {}).get("model"), "t": round(now, 3)}
 
     def _publish(self, now: float) -> None:
         row = self._row(now)

@@ -193,7 +193,7 @@ class ComputeVerdictTests(unittest.TestCase):
             self.assertEqual(set(step), {"try", "confirm_if", "refute_if"})
         self.assertIn("Call Comcast with the attached evidence", v["next"][0]["try"])
         self.assertIn("Lag Lens evidence for Comcast", v["comcast"])
-        self.assertIn("Episodes (local time; only those not explained by equipment in this home): 4", v["comcast"])
+        self.assertIn("Episodes pointing at Comcast's side (local time): 4", v["comcast"])
         self.assertTrue((s.store.dir / "comcast_evidence.txt").exists())
         self.assertEqual((s.store.dir / "comcast_evidence.txt").read_text(encoding="utf-8"), v["comcast"])
         self.assertEqual(st.snapshot()["verdict"], v)
@@ -247,7 +247,7 @@ class ComcastTextTests(unittest.TestCase):
         self.assertTrue(lines[0].startswith("Lag Lens evidence for Comcast — session 20261011-190000 ("))
         self.assertEqual(lines[1], "Gateway: XB7 10.0.0.1 firmware 3.5p7 | WAN IP: 73.1.2.3 | IPv6 prefix: 2601:abcd:1234::/64 (truncated) "
                                    "| Probe host: mac (en0 1000 Mb/s full (Wi-Fi))")
-        self.assertIn("Episodes (local time; only those not explained by equipment in this home): 1", text)
+        self.assertIn("Episodes pointing at Comcast's side (local time): 1", text)
         header = [ln for ln in lines if ln.startswith("time ")][0]
         for col in ("dur", "class", "gw loss", "Comcast hop", "internet", "direction", "DOCSIS"):
             self.assertIn(col, header)
@@ -302,6 +302,54 @@ class ComcastTextTests(unittest.TestCase):
         text = vm.comcast_text(s.ctx, now=T0 + 100, write=False)
         row = [ln for ln in text.splitlines() if "upstream_delay" in ln][0]
         self.assertEqual(row.split()[4:7], ["0%", "4%", "2%"])  # gw, Comcast hop (IPv6), internet mean
+
+
+    def test_behind_a_router_of_the_users_own(self):
+        # the XB7 in bridge mode: the gateway is the user's router; its log is hidden from the customer login
+        s = self.s
+        st = s.state
+        st.host = {"hostname": "mac", "iface": "en7", "speed": 1000, "duplex": "full", "gateway": "192.168.0.1"}
+        st.set_latest("igd", {"model": "Archer AXE75", "trusted": True, "t": T0})
+        st.set_latest("docsis", {"fw": "7.3.4.0.114", "ds_snr_min": 36.4, "us_pwr_max": 41.3, "log_lines_seen": 0,
+                                 "log_clock_offset_s": 3600.0, "t": T0})
+        st.episodes.append(ep("ep-1", T0 + 40, 60, "docsis_access", subclass="upstream", direction="upstream"))
+        st.episodes.append(ep("ep-2", T0 + 140, 30, "docsis_access", direction="upstream"))
+        st.episodes.append(ep("ep-3", T0 + 200, 5, "xbox_lan"))
+        st.episodes.append(ep("ep-4", T0 + 220, 20, "upload_saturation", subclass="inferred", direction="upstream"))
+        st.episodes.append(ep("ep-5", T0 + 260, 20, "xb7_gateway"))  # the user's own router, not Comcast's
+        st.episodes.append(ep("ep-6", T0 + 300, 9, "single_destination"))
+        st.episodes.append(ep("ep-7", T0 + 320, 9, "unknown"))
+        text = vm.comcast_text(s.ctx, now=T0 + 400, write=False)
+        self.assertIn("Router (customer-owned): 192.168.0.1 Archer AXE75 | Modem: XB7 in bridge mode firmware 7.3.4.0.114", text)
+        self.assertNotIn("Gateway: XB7", text)
+        self.assertIn("Episodes pointing at Comcast's side (local time): 2", text)
+        self.assertIn("(5 other episodes left out", text)
+        rows = "\n".join(ln for ln in text.splitlines() if ln[:2].isdigit())
+        for cls in ("xbox_lan", "upload_saturation", "xb7_gateway", "single_destination", "unknown"):
+            self.assertNotIn(cls, rows)
+        self.assertIn("T3/T4 not visible (the modem hides its event log from the customer login)", text)
+        self.assertNotIn("T3 ×0", text)
+        self.assertNotIn("log clock offset", text)
+        self.assertIn("the customer router and the modem answered normally", text)
+        self.assertIn("The extra delay was in the upload direction in 2 of them.", text)
+        # sentences and next steps name the router; a failing own router is a home problem
+        self.assertIn("your router kept answering", s.state.gw_text(vm.sentence_where(
+            "docsis_access", "high", list(st.episodes), [{"class": "docsis_access", "share": 1.0}], T0 + 400)))
+        self.assertEqual(vm.next_steps("xb7_gateway", st), vm.ROUTER_GATEWAY_STEPS)
+        self.assertIn("router port", vm.next_steps("xbox_lan", st)[0]["try"])
+        self.assertIn("XB7 port", vm.next_steps("xbox_lan", None)[0]["try"])
+
+    def test_gateway_naming(self):
+        from laglens.state import gateway_is_modem, gateway_text
+        self.assertTrue(gateway_is_modem({}, "10.0.0.1"))  # the XB7 as the router (default modem address)
+        self.assertTrue(gateway_is_modem({}, None))  # unknown gateway: keep the XB7 wording
+        self.assertFalse(gateway_is_modem({}, "192.168.0.1"))
+        self.assertFalse(gateway_is_modem({"docsis": {"url": "http://10.0.0.1"}}, "192.168.1.1"))
+        self.assertTrue(gateway_is_modem({"docsis": {"url": "http://192.168.1.1"}}, "192.168.1.1"))
+        self.assertEqual(gateway_text("your XB7 gateway stopped answering", False), "your router stopped answering")
+        self.assertEqual(gateway_text("while the XB7 and the internet were fine", False),
+                         "while your router and the internet were fine")
+        self.assertEqual(gateway_text("the XB7 answered normally", True), "the XB7 answered normally")
 
 
 class HeadlineTests(unittest.TestCase):

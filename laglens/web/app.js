@@ -1017,7 +1017,7 @@
     else sec13.appendChild(h('ul', null, [
       'Episodes open on ≥ 2 severity symptoms on a non-hop target and close after 10 s quiet; blips under 1.5 s are not counted.',
       'The loss locus is the shallowest ladder target (gateway → Comcast hop → mid-path → internet) lost in ≥ 70% of the 250 ms slots where a deeper target was lost.',
-      'ICMP to the XB7 gateway is answered by its CPU: gateway latency alone is weak evidence.',
+      'ICMP to the gateway is answered by its CPU: gateway latency alone is weak evidence.',
       'Loss at an intermediate hop alone is not evidence; it only counts when deeper targets suffer in the same slots.',
       'Host-side faults (stalls, Wi-Fi drops, interface errors, VPN routes, clock jumps) exonerate Comcast for overlapping episodes.'
     ].map(function (m) { return h('li', null, m); })));

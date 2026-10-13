@@ -1096,6 +1096,7 @@ class DocsisCollector:
             "uptime_s": row["uptime_s"], "flags": flags, "log_new": row["log_new"][:20], "fw": row["fw"],
             "log_clock_offset_s": row["log_clock_offset_s"], "t": row["t"], "ds_channels": len(row["ds"]),
             "us_channels": len(row["us"]),
+            "log_lines_seen": len(self.log_lines),  # 0: this firmware hides the event log (no T3/T4 view)
         }
         self.state.set_latest("docsis", latest)
         try:

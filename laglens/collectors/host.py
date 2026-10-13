@@ -382,7 +382,7 @@ class HostCollector:
         via = bool(vpn.get("via_tunnel"))
         if via and not self._vpn_route:
             self.state.raise_note("vpn_route", t=now, severity=2,
-                                  note="probes would go through the VPN (%s), not the XB7" % (vpn.get("iface") or "tunnel"),
+                                  note="probes would go through the VPN (%s), not your gateway" % (vpn.get("iface") or "tunnel"),
                                   iface=vpn.get("iface"))
         if via != bool(self._vpn_route):
             with self.state.lock:

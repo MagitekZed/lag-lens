@@ -35,6 +35,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from laglens.state import gateway_is_modem, gateway_text
+
 log = logging.getLogger("laglens.doctor")
 
 OK = "ok"
@@ -486,7 +488,7 @@ class Doctor:
             r["iface"], "Wi-Fi" if wifi else "wired", r.get("lan_ip"), r.get("prefixlen"), r.get("gateway"), r.get("gateway6") or "none")
         out = [check("default_route", OK if r.get("gateway") else WARN, detail)]
         out.append(check("interface_type", WARN if wifi else OK, "Wi-Fi: %s" % WIFI_WARN if wifi else "wired link",
-                         "plug the probe host into the XB7 with a cable for stronger evidence" if wifi else None))
+                         self._gw("plug the probe host into the XB7 with a cable for stronger evidence") if wifi else None))
         return out
 
     def c_link(self) -> List[Dict[str, Any]]:
@@ -497,13 +499,14 @@ class Doctor:
         detail = "speed %s Mb/s, duplex %s, carrier %s, carrier_changes %s" % (speed, duplex, lk.get("carrier"), lk.get("carrier_changes"))
         if not lk.get("wireless") and ((speed is not None and speed < 1000) or (duplex is not None and duplex != "full")):
             return [check("link", WARN, "negotiated %s Mb/s / %s duplex: suspect cable or port" % (speed, duplex or "?"),
-                          "try another cable/port on the XB7")]
+                          self._gw("try another cable/port on the XB7"))]
         return [check("link", OK, detail)]
 
     def c_vpn(self) -> List[Dict[str, Any]]:
         v = self.platform.vpn_routes(INET4) or {}
         if v.get("via_tunnel"):
-            return [check("vpn", WARN, "route to 1.1.1.1 goes via %s: probes would go through the VPN, not the XB7" % v.get("iface"),
+            return [check("vpn", WARN, self._gw("route to 1.1.1.1 goes via %s: probes would go through the VPN, not the XB7")
+                          % v.get("iface"),
                           "disconnect the VPN (or exclude 1.1.1.1/8.8.8.8 from it) for a clean measurement")]
         return [check("vpn", OK, "no tunnel on the path to 1.1.1.1 (via %s)" % (v.get("iface") or "?"))]
 
@@ -573,10 +576,17 @@ class Doctor:
                 parts.append("%s (%s): failed (%s)" % (label, server, r.get("error") or "rcode %s" % r.get("rcode")))
         return out + [check("dns", OK if ok else FAIL, "; ".join(parts), None if ok else "DNS probes will report failures")]
 
+    def _gw_is_modem(self) -> bool:
+        return gateway_is_modem(self.cfg, (self.route or {}).get("gateway"))
+
+    def _gw(self, text: str) -> str:
+        """``text`` with the gateway named for this network (the XB7, or a router of the user's own)."""
+        return gateway_text(text, self._gw_is_modem())
+
     def c_xbox(self) -> List[Dict[str, Any]]:
         ip = (self.cfg.get("targets") or {}).get("xbox_ip")
         if ip:
-            return [check("xbox", OK, "configured %s" % ip, "give the Xbox a DHCP reservation on the XB7 so the address stays put")]
+            return [check("xbox", OK, "configured %s" % ip, self._gw("give the Xbox a DHCP reservation on the XB7 so the address stays put"))]
         cands = []
         if not self.no_net:
             ouis = set(microsoft_ouis())
@@ -611,8 +621,9 @@ class Doctor:
             return [check("igd", SKIP, "no gateway")]
         r = self._igd_probe(gw)
         if not r.get("found"):
-            return [check("igd", WARN, r.get("error") or "no IGD responded (UPnP off on the XB7?)",
-                          "enable UPnP on the XB7 (Advanced > Device Discovery) for WAN counters; optional")]
+            return [check("igd", WARN, r.get("error") or self._gw("no IGD responded (UPnP off on the XB7?)"),
+                          "enable UPnP on the XB7 (Advanced > Device Discovery) for WAN counters; optional" if self._gw_is_modem()
+                          else "enable UPnP on your router for WAN counters; optional")]
         detail = "%s; services %s; counters %s; external IP %s" % (
             r.get("location"), ", ".join(r.get("services") or []) or "none",
             "incrementing (accuracy is checked against this computer's own upload while running)" if r.get("counters_move")

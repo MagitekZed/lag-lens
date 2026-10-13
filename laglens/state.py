@@ -25,6 +25,7 @@ most 5 s before the session ``t0``.
 """
 import threading
 import time
+import urllib.parse
 from array import array
 from collections import deque
 from dataclasses import dataclass, field, asdict
@@ -100,6 +101,38 @@ ROW5_KINDS = ("iface", "host", "wifi", "wan", "ntp", "docsis", "xbox", "slots")
 
 #: Sentinel for "argument not passed" (``State.set_target_state(reason=...)``).
 _UNSET: Any = object()
+
+
+DEFAULT_MODEM_URL = "http://10.0.0.1"
+
+# Texts were written for the XB7 as the router. With the XB7 in bridge mode behind a router of the user's
+# own, the gateway is that router: these rewrites (longest first) name it as such.
+_ROUTER_REWRITES = (
+    ("your XB7 gateway", "your router"), ("the XB7 gateway", "your router"), ("XB7 gateway", "router"),
+    ("Everything including the XB7", "Everything including your router"),
+    ("your XB7", "your router"), ("the XB7", "your router"), ("XB7 port", "router port"),
+    ("XB7 CPU", "router CPU"), ("on the XB7", "on your router"), ("to the XB7", "to your router"),
+)
+
+
+def gateway_is_modem(cfg: Optional[dict], gateway: Optional[str]) -> bool:
+    """False once the default gateway is known to be a different box from the modem (the XB7 in bridge mode
+    behind a router of the user's own, whose admin page stays at its own address); True otherwise."""
+    url = ((cfg or {}).get("docsis") or {}).get("url") or DEFAULT_MODEM_URL
+    try:
+        modem = urllib.parse.urlsplit(str(url)).hostname
+    except ValueError:
+        modem = None
+    return not (gateway and modem and str(gateway) != modem)
+
+
+def gateway_text(text: str, is_modem: bool) -> str:
+    """``text`` as written for the XB7-as-router, or with the gateway named "router" when it is not the XB7."""
+    if is_modem or not text:
+        return text
+    for old, new in _ROUTER_REWRITES:
+        text = text.replace(old, new)
+    return text
 
 
 def extra_of(flags: int) -> int:
@@ -506,6 +539,18 @@ class State:
     def target(self, key: str) -> Optional[Target]:
         with self.lock:
             return self.by_key.get(key)
+
+    def gateway_is_modem(self) -> bool:
+        """Is the default gateway the XB7 itself (router mode), rather than a router of the user's own?"""
+        gw = (self.host or {}).get("gateway")
+        if not gw:
+            t = self.target("gw4")
+            gw = t.addr if t is not None else None
+        return gateway_is_modem(self.cfg, gw)
+
+    def gw_text(self, text: str) -> str:
+        """``text`` with the gateway named for this network (see :func:`gateway_text`)."""
+        return gateway_text(text, self.gateway_is_modem())
 
     def target_by_id(self, tid: int) -> Optional[Target]:
         with self.lock:
@@ -1076,4 +1121,5 @@ __all__ = [
     "STATUS_STARTING", "STATUS_WARMUP", "STATUS_OK", "STATUS_TROUBLE", "STATUS_RECENT", "STATUS_LOADTEST",
     "STATUS_GAP", "STATUS_DEGRADED", "STATUS_STOPPED", "LATEST_KINDS", "ROW5_KINDS",
     "Target", "Sample", "Event", "Episode", "Mark", "Rollup", "SecondAcc", "TargetTotals", "State",
+    "DEFAULT_MODEM_URL", "gateway_is_modem", "gateway_text",
 ]

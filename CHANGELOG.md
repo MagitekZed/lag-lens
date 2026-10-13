@@ -3,6 +3,23 @@
 All notable changes to Lag Lens are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and versions follow SemVer.
 
+## [1.0.15] - 2026-10-12
+
+### Fixed
+- Behind a router of your own (the XB7 in bridge mode), Lag Lens no longer calls that router "the XB7".
+  Verdict sentences, the top bar, episode evidence, "Lag happened" summaries, next steps and doctor hints
+  name it "your router", and a gateway that stops answering is reported as a home problem with router steps.
+  The gateway counts as your own router when its address differs from the modem's admin address
+  (`docsis.url`); with the XB7 as the router nothing changes.
+- The Tell-Comcast evidence lists only episodes that point at Comcast's side (cable line, Comcast network,
+  upload delay past the modem) and says how many others were left out. Home episodes (the Xbox's cable, a
+  home upload, this computer, your own router) are no longer listed under a heading that says they are not
+  caused by the home. Behind your own router it shows the router and "Modem: XB7 in bridge mode".
+- When the modem hides its event log from the customer login (the XB7 on current firmware), the evidence
+  says "T3/T4 not visible" instead of "T3 ×0, T4 ×0", which read as "no timeouts", and drops the log clock
+  offset line. The request also asks Comcast for the modem's T3 timeouts and notes how many episodes were in
+  the upload direction.
+
 ## [1.0.14] - 2026-10-12
 
 ### Fixed

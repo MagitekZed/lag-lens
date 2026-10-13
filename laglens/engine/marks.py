@@ -142,6 +142,7 @@ def assess_window(state: State, t_est: float, before_s: float = ASSESS_BEFORE_S,
                 thr = max(p50 + 5.0 * (mad or 0.0), 2.0 * p50, p50 + floor)
                 if sum(1 for r in rtts if r > thr) >= 2:
                     ga.spike = True
+    labels = GROUP_LABELS if state.gateway_is_modem() else dict(GROUP_LABELS, gateway="your router")
     present = [g for g in GROUP_ORDER if g in groups and groups[g].sent > 0]
     lost_groups = [g for g in present if groups[g].lost_packets]
     spike_groups = [g for g in present if groups[g].spike and g not in lost_groups]
@@ -153,20 +154,20 @@ def assess_window(state: State, t_est: float, before_s: float = ASSESS_BEFORE_S,
         first = min(groups[g].first_lost for g in lost_groups if groups[g].first_lost is not None)
         last = max(groups[g].last_lost for g in lost_groups if groups[g].last_lost is not None)
         dur = max(1, int(round(last - first + 0.25)))
-        names = _join([GROUP_LABELS[g] for g in lost_groups])
+        names = _join([labels[g] for g in lost_groups])
         if lost_groups == present:
-            names = "Everything including the XB7" if "gateway" in present else names
+            names = state.gw_text("Everything including the XB7") if "gateway" in present else names
         verb = "stopped answering" if lost_groups == ["xbox"] else "lost packets"
         parts.append("%s %s for %d s starting %s" % (_cap(names), verb, dur, time.strftime("%H:%M:%S", time.localtime(first))))
     if spike_groups:
         g0 = spike_groups[0]
         ga = groups[g0]
-        names = _join([GROUP_LABELS[g] for g in spike_groups])
+        names = _join([labels[g] for g in spike_groups])
         base = " (normally %d ms)" % int(round(ga.base_p50)) if ga.base_p50 is not None else ""
         parts.append("%s latency rose to %d ms%s" % (_cap(names), int(round(ga.rtt_max or 0)), base))
     sentence = "; ".join(parts)
     if fine_groups:
-        sentence += "; %s answered normally" % _join([GROUP_LABELS[g] for g in fine_groups])
+        sentence += "; %s answered normally" % _join([labels[g] for g in fine_groups])
     return sentence + ".", groups
 
 

@@ -1413,7 +1413,7 @@ def _apply(ep: Episode, f: Features, ctx: Any) -> None:
     ep.cls = chosen.name
     ep.subclass = chosen.subclass
     ep.confidence = round(conf, 2)
-    ep.evidence = common_evidence(f) + chosen.evidence
+    ep.evidence = [ctx.state.gw_text(line) for line in common_evidence(f) + chosen.evidence]
     if len(chosen.signals) <= 1 and chosen.name != "unknown":
         ep.evidence.append("single signal: confidence reduced by 0.2")
     # alternative: the best near miss (or a later full match)
