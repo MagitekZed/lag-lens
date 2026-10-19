@@ -45,7 +45,7 @@ SAMPLE_SIZE = SAMPLE_STRUCT.size  # 20
 assert SAMPLE_SIZE == 20
 
 JSONL_NAMES = frozenset(
-    {"rollups", "events", "episodes", "marks", "tags", "path", "xb7", "igd", "host", "loadtests", "docs"}
+    {"rollups", "events", "episodes", "marks", "tags", "path", "xb7", "igd", "host", "loadtests", "docs", "plex"}
 )
 GZIP_ON_STOP = ("samples.bin", "host.jsonl")
 FSYNC_FILES = ("samples.bin", "events.jsonl")

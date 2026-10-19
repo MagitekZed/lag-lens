@@ -95,6 +95,9 @@ LATE_STALL_MS = 50.0
 GAP_STALL_MS = 200.0
 GW6_NO_RESPONDER_S = 60.0
 LAN_RETRY_S = 60.0
+#: A block that comes back right after a retry let one packet through is the same block: warn (and note) at most
+#: this often, and never record the blocked sends as probe errors (they would read as a LAN device failing).
+LAN_WARN_INTERVAL_S = 1800.0
 INET_EVIDENCE_S = 10.0
 MIN_TIMEOUT_S = 0.001
 MAX_TIMEOUT_S = 0.25
@@ -255,6 +258,7 @@ class Engine:
 
         self._inet_last_reply: Optional[float] = None
         self._lan_blocked: Dict[str, Target] = {}
+        self._lan_warned_at: Optional[float] = None
         self._next_lan_retry: float = 0.0
         self._lan_msg: Optional[str] = None
         self._lan_net4: Optional[Any] = None
@@ -559,7 +563,9 @@ class Engine:
         lan_detected = False
         if code == errno.EHOSTUNREACH and sch.lan and self.platform_name == "darwin":
             lan_detected = self._lan_detect(sch, now)
-        if not lan_detected and now - sch.last_error_log >= ERROR_LOG_INTERVAL_S:
+        if lan_detected:
+            return  # macOS refused the send: not a sample of the device (the target is paused until allowed)
+        if now - sch.last_error_log >= ERROR_LOG_INTERVAL_S:
             sch.last_error_log = now
             log.warning("engine: send to %s (%s) failed: %s", sch.key, sch.target.addr, sch.last_error)
         self._emit(Sample(ts_ms=ts_ms, target_id=sch.tid, kind=KIND_ICMP, flags=flags | F_ERROR, seq=seq, value=code),
@@ -858,10 +864,13 @@ class Engine:
                 self.state.set_target_state(t.key, enabled=False, reason=LAN_REASON)
                 self._lan_blocked[t.key] = t
                 self._sched.pop(t.id, None)
-        if first:
+        if first and (self._lan_warned_at is None or now - self._lan_warned_at >= LAN_WARN_INTERVAL_S):
+            self._lan_warned_at = now
             log.warning("engine: %s", msg)
             self.state.raise_note("probe_error", target=sch.tid, severity=2, note=msg, reason="local_network_permission",
                                   app=app, errno=errno.EHOSTUNREACH)
+        elif first:
+            log.info("engine: local network still blocked after a retry let one packet through")
         self._lan_msg = msg
         self._next_lan_retry = now + LAN_RETRY_S
         self._announce_status()

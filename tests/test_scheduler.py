@@ -784,6 +784,25 @@ class LocalNetworkTests(unittest.TestCase):
         self.assertFalse(h.samples("gw4")[-1].flags & (F_ERROR | F_LOST))
         h.close()
 
+    def test_a_block_that_returns_after_a_retry_is_not_a_device_failure(self):
+        # macOS lets the retry's single packet through, then blocks the next sends again (seen on a real Mac):
+        # the targets pause again without a second warning, and blocked sends are never recorded as errors
+        h, blocked = self._harness()
+        h.drive(1.5)
+        self.assertEqual(len([n for n in h.state.drain_notes() if n["type"] == "probe_error"]), 1)
+        h.drive(58.0)
+        blocked["on"] = False
+        h.drive(3.0)  # the retry gets through: re-enabled
+        self.assertTrue(h.state.target("gw4").enabled)
+        n_err = len([s for s in h.samples("gw4") if s.flags & F_ERROR])
+        blocked["on"] = True
+        h.drive(3.0)
+        self.assertFalse(h.state.target("gw4").enabled)
+        self.assertEqual(h.state.target("gw4").reason, scheduler.LAN_REASON)
+        self.assertEqual(len([s for s in h.samples("gw4") if s.flags & F_ERROR]), n_err)
+        self.assertEqual([n for n in h.state.drain_notes() if n["type"] == "probe_error"], [])
+        h.close()
+
     def test_no_internet_evidence_means_no_verdict(self):
         h, blocked = self._harness()
         h.socks[4].responder = None  # nothing answers: could be the network itself

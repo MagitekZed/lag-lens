@@ -250,6 +250,15 @@ class CollectorTests(unittest.TestCase):
         self.assertIsNotNone(ctx.state.target("plex_srv"))
         self.assertEqual(ctx.state.target("plex_player_0").label, "Plex player HTPC (192.168.0.20)")
 
+    def test_rows_reach_the_real_store_and_this_computer_is_no_player(self):
+        sess = Session(cfg=make_cfg(warmup_s=30))
+        self.addCleanup(sess.close)
+        sess.store.append_json("plex", {"t": T0, "sessions": []})  # a known file name (no ValueError)
+        ctx, clk, srv, col = make(pingable=("192.168.0.20", "192.168.0.30"))
+        ctx.state.host = {"lan_ip": "192.168.0.30"}  # Plex Web open on the probe host itself
+        col.step()
+        self.assertEqual([p["ip"] for p in col.status()["players"]], ["192.168.0.20"])
+
     def test_server_offline_then_back(self):
         ctx, clk, srv, col = make()
         col.step()

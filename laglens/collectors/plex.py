@@ -586,6 +586,8 @@ class PlexCollector:
                 return
             if len(self.players) >= MAX_PLAYERS or (self.server and ip == self.server.get("ip")):
                 return
+            if ip == (self.state.host or {}).get("lan_ip"):
+                return  # Plex open in a browser on this computer: not a player worth probing
             idx = len(self.players)
             self.players[ip] = {"ip": ip, "name": name, "key": "plex_player_%d" % idx, "pingable": None, "asleep": False,
                                 "checked": None, "in_session": in_session}

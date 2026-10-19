@@ -3,6 +3,17 @@
 All notable changes to Lag Lens are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and versions follow SemVer.
 
+## [1.0.17] - 2026-10-18
+
+### Fixed
+- Plex mode's per-poll history (`plex.jsonl`) was never written: the session store did not know the file
+  name and the error was swallowed.
+- Plex Web open on the computer running Lag Lens no longer adds that computer as a Plex player.
+- When macOS blocks this app's traffic to the local network, blocked sends are no longer recorded as probe
+  errors (they opened false "player dropped" and unclassified episodes), and a block that returns right
+  after the once-a-minute retry lets a packet through is no longer re-announced: the warning and its note
+  appear at most once per 30 minutes.
+
 ## [1.0.16] - 2026-10-18
 
 ### Added
