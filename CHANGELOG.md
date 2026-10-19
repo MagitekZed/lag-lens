@@ -3,6 +3,12 @@
 All notable changes to Lag Lens are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and versions follow SemVer.
 
+## [1.0.19] - 2026-10-18
+
+### Fixed
+- Send errors from an Xbox in rest mode (macOS refuses sends to a LAN host that does not answer ARP) no
+  longer open "unclassified" episodes; like the console's silence, they are ignored until it is awake.
+
 ## [1.0.18] - 2026-10-18
 
 ### Fixed

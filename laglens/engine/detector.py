@@ -670,6 +670,11 @@ class Detector:
         errs = [s for s in samples if s.flags & F_ERROR]
         if not errs:
             return
+        if target.role == "xbox" and self.state.xbox.get("state") != "awake":
+            # a console in rest mode does not answer ARP, so macOS refuses the sends (EHOSTUNREACH): like its
+            # silence (see _icmp_symptoms), that is not a fault
+            self._err_cursor[target.id] = errs[-1].ts_ms
+            return
         cursor = self._err_cursor.get(target.id, -1)
         new = [s for s in errs if s.ts_ms > cursor]
         self._err_cursor[target.id] = errs[-1].ts_ms

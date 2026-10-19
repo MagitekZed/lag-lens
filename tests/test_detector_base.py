@@ -210,6 +210,21 @@ class SymptomTests(DetectorBase):
         self.assertFalse(evs[0].peak["permission"])
         self.assertIn("errno 51", evs[0].note)
 
+    def test_send_errors_of_a_sleeping_xbox_are_not_symptoms(self):
+        s = self.s
+        s.state.xbox = dict(s.state.xbox, state="asleep")  # rest mode: no ARP answer, so macOS refuses the sends
+
+        def per(t):
+            if T0 + 20 <= t < T0 + 26:
+                s.emit("xbox", t + 0.9, error=65)
+
+        feed(s, self.det.step, T0, T0 + 40, keys=["inet4_cf"], per_second=per)
+        self.assertEqual(s.events("probe_error", "xbox"), [])
+        s.state.xbox = dict(s.state.xbox, state="awake")  # an awake console that refuses sends is a fault again
+        feed(s, self.det.step, T0 + 40, T0 + 70, keys=["inet4_cf"],
+             per_second=lambda t: s.emit("xbox", t + 0.9, error=65) if T0 + 50 <= t < T0 + 53 else None)
+        self.assertEqual(len(s.events("probe_error", "xbox")), 1)
+
     def test_engine_probe_error_note_shares_the_rate_limit(self):
         s = self.s
         gw = s.ids["gw4"]
