@@ -803,6 +803,24 @@ class LocalNetworkTests(unittest.TestCase):
         self.assertEqual([n for n in h.state.drain_notes() if n["type"] == "probe_error"], [])
         h.close()
 
+    def test_a_sleeping_lan_device_is_not_a_permission_block(self):
+        # macOS returns EHOSTUNREACH for a LAN host that does not answer ARP (an Xbox in rest mode): the gateway
+        # answers, so the permission is fine and only that device is unreachable
+        h, blocked = self._harness()
+        blocked["on"] = False
+        h.socks[4].responder = echo_responder({"1.1.1.1": 0.020, "10.0.0.1": 0.002})
+        prev = h.socks[4].fail
+        h.socks[4].fail = lambda addr: OSError(errno.EHOSTUNREACH, "No route to host") if addr[0] == "10.0.0.23" else prev(addr)
+        h.drive(5.0)
+        self.assertTrue(h.state.target("gw4").enabled)
+        self.assertTrue(h.state.target("xbox").enabled)
+        self.assertEqual(h.engine.stats()["local_network"], "ok")
+        self.assertFalse(h.samples("gw4")[-1].flags & (F_ERROR | F_LOST))
+        self.assertTrue(all(s.flags & F_ERROR for s in h.samples("xbox")))
+        self.assertEqual([n for n in h.state.drain_notes() if n["type"] == "probe_error"
+                          and n["peak"].get("reason") == "local_network_permission"], [])
+        h.close()
+
     def test_no_internet_evidence_means_no_verdict(self):
         h, blocked = self._harness()
         h.socks[4].responder = None  # nothing answers: could be the network itself

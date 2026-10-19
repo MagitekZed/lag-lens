@@ -561,7 +561,10 @@ class Engine:
         sch.errors += 1
         sch.last_error = "%s (errno %d)" % (exc.strerror or exc, code)
         lan_detected = False
-        if code == errno.EHOSTUNREACH and sch.lan and self.platform_name == "darwin":
+        # Only the gateway can prove a Local Network block: macOS also answers EHOSTUNREACH for any LAN device
+        # that does not answer ARP (a sleeping Xbox or player), and that device is merely unreachable.
+        if (code == errno.EHOSTUNREACH and sch.lan and self.platform_name == "darwin"
+                and sch.target.role == "gateway"):
             lan_detected = self._lan_detect(sch, now)
         if lan_detected:
             return  # macOS refused the send: not a sample of the device (the target is paused until allowed)

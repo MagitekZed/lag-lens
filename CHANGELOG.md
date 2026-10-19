@@ -3,6 +3,15 @@
 All notable changes to Lag Lens are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and versions follow SemVer.
 
+## [1.0.18] - 2026-10-18
+
+### Fixed
+- A sleeping or switched-off LAN device (an Xbox in rest mode, an idle Plex player) no longer reads as
+  "macOS blocked traffic to your local network". macOS answers EHOSTUNREACH both for a Local Network
+  permission block and for any LAN host that does not answer ARP; only a failure to reach the gateway,
+  which always answers, now counts as a block. Before, a sleeping Xbox paused the gateway and every LAN
+  target, and the once-a-minute retry made them flap.
+
 ## [1.0.17] - 2026-10-18
 
 ### Fixed
