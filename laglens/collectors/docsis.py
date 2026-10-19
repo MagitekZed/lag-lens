@@ -97,6 +97,9 @@ _LOG_CLASSES: Sequence[Tuple[str, "re.Pattern[str]"]] = (
     ("partial", re.compile(r"Partial Service", re.I)),
 )
 _UPTIME_RE = re.compile(r"System\s*Up\s*time\s*:?\s*([0-9][0-9dDhHmMsS :,a-z]*)", re.I)
+_MODEL_RE = re.compile(r"\bModel\s*:?\s*([A-Z]{2,4}\d{3,5}[A-Z0-9]*)\b")
+#: Xfinity gateway hardware models (the hardware page's "Model") and the names people know them by.
+XFINITY_MODELS = {"TG3482G": "XB6", "CGM4140COM": "XB6", "TG4482A": "XB7", "CGM4331COM": "XB7", "CGM4981COM": "XB8"}
 _FW_RE = re.compile(r"(?:Software Version|Firmware(?: Version)?|Software Image Name|Download Version)\s*:?\s*([A-Za-z0-9][A-Za-z0-9._+-]{2,})")
 _LOCAL_TIME_RE = re.compile(r"Local time\s*:?\s*(\d{4}-\d{2}-\d{2}\s+\d{1,2}:\d{2}:\d{2})")
 # The RDK-B troubleshooting page renders empty tables and fills them from this JSON endpoint.
@@ -446,6 +449,19 @@ def parse_uptime(text: str) -> Optional[int]:
     return total if found else None
 
 
+def parse_model(text: str) -> Optional[str]:
+    """The hardware model on a status page ("Model: CGM4981COM"), else ``None``."""
+    m = _MODEL_RE.search(text or "")
+    return m.group(1) if m else None
+
+
+def model_name(hw: Optional[str]) -> Optional[str]:
+    """``XB8`` for ``CGM4981COM`` and so on; an unknown model keeps its own name."""
+    if not hw:
+        return None
+    return XFINITY_MODELS.get(hw.upper(), hw)
+
+
 def parse_fw(text: str) -> Optional[str]:
     m = _FW_RE.search(text or "")
     return m.group(1) if m else None
@@ -490,6 +506,7 @@ def parse_page(html: str) -> Dict[str, Any]:
     """Everything one page yields: ``ds``/``us`` channels, ``log`` lines, ``uptime_s``, ``fw``, ``tables``."""
     tables, text = extract_tables(html)
     res: Dict[str, Any] = {"ds": [], "us": [], "log": [], "uptime_s": parse_uptime(text), "fw": parse_fw(text),
+                           "model": parse_model(text),
                            "local_ts": parse_local_time(text), "tables": [], "logged_out": logged_out(html)}
     ds: Dict[int, Dict[str, Any]] = {}
     us: Dict[int, Dict[str, Any]] = {}
@@ -529,8 +546,11 @@ def merge_pages(pages: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
     logs: "OrderedDict[Tuple[str, str], Dict[str, Any]]" = OrderedDict()
     uptime = None
     fw = None
+    model = None
     local_ts = None
     for _path, p in pages.items():
+        if model is None and p.get("model"):
+            model = p["model"]
         if local_ts is None and p.get("local_ts") is not None:
             local_ts = p["local_ts"]
         _merge_channels(ds, p.get("ds") or [])
@@ -542,7 +562,7 @@ def merge_pages(pages: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
         if fw is None and p.get("fw"):
             fw = p["fw"]
     return {"ds": [ds[k] for k in sorted(ds)], "us": [us[k] for k in sorted(us)], "log": list(logs.values()),
-            "uptime_s": uptime, "fw": fw, "local_ts": local_ts}
+            "uptime_s": uptime, "fw": fw, "model": model, "local_ts": local_ts}
 
 
 def _is_locked(c: Dict[str, Any]) -> bool:
@@ -873,6 +893,8 @@ class DocsisCollector:
             "us_channels": len(prev.get("us") or []),
             "uptime_s": prev.get("uptime_s"),
             "fw": prev.get("fw"),
+            "hw_model": prev.get("model"),
+            "model": model_name(prev.get("model")),
             "flags": list(polls[-1].get("flags") or []) if polls else [],
             "pages": {p["path"]: ("dropped" if p["dropped"] else p["status"]) for p in self.pages},
             "last_error": self.last_error,
@@ -889,14 +911,14 @@ class DocsisCollector:
             ok = self.client.login()
         except Xb7Error as exc:
             self.last_error = str(exc)
-            self.state.set_collector(self.name, "degraded", reason="XB7 unreachable: %s" % exc)
+            self.state.set_collector(self.name, "degraded", reason=self.state.gw_text("XB7 unreachable: %s" % exc))
             return False
         if ok:
             self._login_failures = 0
             return True
         refused = getattr(self.client, "refused", None)
         if refused:
-            reason = PASSWORD_REJECTED % refused
+            reason = self.state.gw_text(PASSWORD_REJECTED % refused)
             with self._lock:
                 self._paused_until = self._mono() + LOGIN_REFUSED_PAUSE_S
                 self._extra.clear()
@@ -909,10 +931,12 @@ class DocsisCollector:
             with self._lock:
                 self._paused_until = self._mono() + LOGIN_PAUSE_S
                 self._extra.clear()
-            self.state.set_collector(self.name, "degraded", reason=LOGIN_REJECTED_CHIP, login_failures=self._login_failures)
+            self.state.set_collector(self.name, "degraded", reason=self.state.gw_text(LOGIN_REJECTED_CHIP),
+                                     login_failures=self._login_failures)
             log.warning("docsis: %s", LOGIN_REJECTED_CHIP)
         else:
-            self.state.set_collector(self.name, "degraded", reason="XB7: login rejected (%d/%d)" % (self._login_failures, LOGIN_FAILURES_BEFORE_PAUSE))
+            self.state.set_collector(self.name, "degraded", reason=self.state.gw_text(
+                "XB7: login rejected (%d/%d)" % (self._login_failures, LOGIN_FAILURES_BEFORE_PAUSE)))
         return False
 
     def _fetch_pages(self) -> Tuple[Dict[str, str], Dict[str, int]]:
@@ -983,10 +1007,10 @@ class DocsisCollector:
         try:
             htmls, codes = self._fetch_pages()
         except Xb7Error as exc:
-            self.state.set_collector(self.name, "degraded", reason="XB7 unreachable: %s" % exc)
+            self.state.set_collector(self.name, "degraded", reason=self.state.gw_text("XB7 unreachable: %s" % exc))
             return None
         if not htmls:
-            self.state.set_collector(self.name, "degraded", reason="no XB7 status page could be fetched")
+            self.state.set_collector(self.name, "degraded", reason=self.state.gw_text("no XB7 status page could be fetched"))
             return None
         parsed = {p: parse_page(h) for p, h in htmls.items()}
         merged = merge_pages(parsed)
@@ -1082,6 +1106,7 @@ class DocsisCollector:
                 "ok": True,
                 "uptime_s": merged.get("uptime_s"),
                 "fw": merged.get("fw"),
+                "hw_model": merged.get("model") or (self._prev or {}).get("model"),
                 "ds": merged["ds"],
                 "us": merged["us"],
                 "log_new": new_lines,
@@ -1109,7 +1134,7 @@ class DocsisCollector:
             for ln in row["log_new"]:
                 if ln["class"] in NOTE_CLASSES and not ln.get("history"):
                     self.state.raise_note("docsis_" + ln["class"], t=now, severity=CLASS_SEVERITY.get(ln["class"], 3),
-                                          note="XB7 log: %s %s" % (ln["ts"], ln["text"][:200]), ts=ln["ts"], text=ln["text"][:400],
+                                          note=self.state.gw_text("XB7 log: %s %s" % (ln["ts"], ln["text"][:200])), ts=ln["ts"], text=ln["text"][:400],
                                           log_ts=parse_log_ts(ln["ts"]))
         fset = set(flags)
         if "uncorr_burst" in fset:
@@ -1127,12 +1152,13 @@ class DocsisCollector:
                                   note="locked downstream channel count dropped", ds_locked=sum(1 for c in merged["ds"] if _is_locked(c)))
         if "reboot" in fset:
             self.state.raise_note("docsis_reboot", t=now, severity=CLASS_SEVERITY["reboot"],
-                                  note="XB7 uptime decreased (modem rebooted)", uptime_s=row["uptime_s"])
+                                  note=self.state.gw_text("XB7 uptime decreased (modem rebooted)"), uptime_s=row["uptime_s"])
         self._prev_flags = ps
         latest = {
             "ds_snr_min": row["ds_snr_min"], "ds_pwr_min": row["ds_pwr_min"], "ds_pwr_max": row["ds_pwr_max"],
             "us_pwr_max": row["us_pwr_max"], "uncorr_delta": row["uncorr_delta"], "corr_delta": row["corr_delta"],
             "uptime_s": row["uptime_s"], "flags": flags, "log_new": row["log_new"][:20], "fw": row["fw"],
+            "hw_model": row.get("hw_model"), "model": model_name(row.get("hw_model")),
             "log_clock_offset_s": row["log_clock_offset_s"], "t": row["t"], "ds_channels": len(row["ds"]),
             "us_channels": len(row["us"]),
             "log_lines_seen": len(self.log_lines),  # 0: this firmware hides the event log (no T3/T4 view)

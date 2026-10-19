@@ -283,6 +283,25 @@ class DeriveTests(unittest.TestCase):
         self.assertIsNone(r["deltas"]["uncorr"]["18"])
 
 
+class ModelTests(unittest.TestCase):
+    def test_model_from_the_hardware_page_names_the_gateway(self):
+        hw = ('<div class="form-row"><span class="readonlyLabel">Model:</span> <span class="value">CGM4981COM</span></div>'
+              '<div class="form-row"><span class="readonlyLabel">Vendor:</span> <span class="value">Technicolor</span></div>')
+        self.assertEqual(d.parse_page(hw)["model"], "CGM4981COM")
+        self.assertEqual([d.model_name(m) for m in ("CGM4981COM", "TG4482A", "cgm4331com", "SX9999Z", None)],
+                         ["XB8", "XB7", "XB7", "SX9999Z", None])
+        pages = dict(site_pages(), **{"/hardware.jst": hw})
+        ctx, clk, op, dc = make(opener=FakeOpener(pages))
+        self.assertTrue(dc.poll()["ok"])
+        lat = ctx.state.latest("docsis")
+        self.assertEqual((lat["model"], lat["hw_model"]), ("XB8", "CGM4981COM"))
+        self.assertEqual(dc.recent()["summary"]["model"], "XB8")
+        self.assertEqual(ctx.state.modem_name(), "XB8")
+        self.assertEqual(ctx.state.gw_text("XB7 reboot/reset count: 1."), "XB8 reboot/reset count: 1.")
+        # before any status page has been read the old default stands
+        self.assertEqual(Ctx(cfg()).state.modem_name(), "XB7")
+
+
 class LoginTests(unittest.TestCase):
     def test_login_posts_then_verifies(self):
         op = FakeOpener(site_pages())

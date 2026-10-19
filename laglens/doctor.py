@@ -603,7 +603,7 @@ class Doctor:
     def c_xb7(self) -> List[Dict[str, Any]]:
         d = self.cfg.get("docsis") or {}
         if not d.get("password"):
-            return [check("xb7_login", SKIP, "docsis.password not set (XB7 scraping off)", "set docsis.password in config.json to collect modem stats")]
+            return [check("xb7_login", SKIP, "docsis.password not set (modem stats off)", "set docsis.password in config.json to collect modem stats")]
         if self.no_net:
             return [self._skip("xb7_login")]
         r = self._docsis_probe(self.cfg)
@@ -802,7 +802,7 @@ def _docsis_probe(cfg: dict) -> Dict[str, Any]:
     cli = dmod.Xb7Client(dcfg)
     try:
         if not cli.login():
-            return {"ok": False, "error": "XB7 rejected the login (user %s)" % cli.username}
+            return {"ok": False, "error": "the gateway rejected the login (user %s)" % cli.username}
         kinds: List[str] = []
         tables = 0
         log_page = False

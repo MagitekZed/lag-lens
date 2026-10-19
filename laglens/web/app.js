@@ -363,6 +363,7 @@
 
   D.applyState = function (st, first) {
     var self = this;
+    if (LL.watchSession(st)) return;
     this.state = st;
     this.paintPill(st.state, st.pill);
     var health = (st.health && st.health.now != null) ? st.health.now : null;
@@ -548,6 +549,7 @@
       LL.clear(wrap); wrap.appendChild(h('div', { class: 'muted' }, 'modem data not collected' + (col.reason ? ' (' + col.reason + ')' : ''))); return;
     }
     LL.api.get('/api/docsis?last=20').then(function (d) {
+      var mn = $('modem-name'); if (mn && d.summary && d.summary.model) mn.textContent = d.summary.model;
       LL.clear(wrap);
       var polls = d.polls || [], last = polls.length ? polls[polls.length - 1] : null;
       if (!last) { wrap.appendChild(h('div', { class: 'muted' }, 'no modem poll yet')); return; }
@@ -999,7 +1001,7 @@
     rootEl.appendChild(sec9);
 
     // 10. DOCSIS + IGD
-    var sec10 = section('sec-docsis', '10. DOCSIS (XB7) and IGD summary');
+    var sec10 = section('sec-docsis', '10. DOCSIS (modem) and IGD summary');
     var dx = data.docsis;
     if (dx && dx.polls && dx.polls.length) {
       var polls = dx.polls, last = polls[polls.length - 1];

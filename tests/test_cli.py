@@ -10,6 +10,7 @@ import signal
 import stat
 import sys
 import tempfile
+import time
 import types
 import unittest
 from pathlib import Path
@@ -674,6 +675,10 @@ class SingleInstanceTests(unittest.TestCase):
         p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)", "run.py"])
         self.addCleanup(p.wait)
         self.addCleanup(p.kill)
+        # right after fork the child still shows the test runner's command line: wait for its own (no race)
+        deadline = time.time() + 5.0
+        while not app._is_laglens_process(p.pid) and time.time() < deadline:
+            time.sleep(0.02)
         return p
 
     def test_live_monitor_is_found_with_its_session_and_port(self):

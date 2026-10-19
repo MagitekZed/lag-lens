@@ -19,6 +19,16 @@
   }
   LL.token = meta('laglens-token');
   LL.version = meta('laglens-version');
+  // A restarted Lag Lens is a new session with a new token: a page left open across the restart would look
+  // connected while every press is refused, so it reloads itself as soon as it sees the new session.
+  LL.sessionId = null;
+  LL.watchSession = function (st, reload) {
+    var id = st && st.session && st.session.id;
+    if (!id) return false;
+    if (LL.sessionId && LL.sessionId !== id) { (reload || function () { root.location.reload(); })(); return true; }
+    LL.sessionId = id;
+    return false;
+  };
   LL.isStatic = !!(doc && doc.getElementById && doc.getElementById('laglens-data'));
   LL.DEFAULT_ACTIVITIES = ['idle', 'bf6', 'rocket_league', 'hbo_max', 'other'];
   // The configured activity slugs come from <meta name="laglens-activities"> (server-injected).

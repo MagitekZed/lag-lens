@@ -147,7 +147,8 @@ def assess_window(state: State, t_est: float, before_s: float = ASSESS_BEFORE_S,
                 thr = max(p50 + 5.0 * (mad or 0.0), 2.0 * p50, p50 + floor)
                 if sum(1 for r in rtts if r > thr) >= 2:
                     ga.spike = True
-    labels = GROUP_LABELS if state.gateway_is_modem() else dict(GROUP_LABELS, gateway="your router")
+    labels = (dict(GROUP_LABELS, gateway=state.modem_name()) if state.gateway_is_modem()
+              else dict(GROUP_LABELS, gateway="your router"))
     present = [g for g in GROUP_ORDER if g in groups and groups[g].sent > 0]
     lost_groups = [g for g in present if groups[g].lost_packets]
     spike_groups = [g for g in present if groups[g].spike and g not in lost_groups]

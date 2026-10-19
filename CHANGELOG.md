@@ -3,6 +3,22 @@
 All notable changes to Lag Lens are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and versions follow SemVer.
 
+## [1.0.21] - 2026-10-18
+
+### Changed
+- The modem is named by its model instead of always "XB7": the hardware page's model is read
+  (`CGM4981COM` → XB8, `TG4482A`/`CGM4331COM` → XB7, `TG3482G`/`CGM4140COM` → XB6, anything else by its
+  own name) and used in the dashboard's modem panel, verdicts, evidence lines, modem messages and the
+  Tell-Comcast header ("Modem: XB8 (CGM4981COM) in bridge mode"). Until a status page has been read the
+  old "XB7" wording stays; texts that cannot know the model say "gateway" or "modem".
+
+### Fixed
+- A dashboard or phone page left open while Lag Lens restarted kept the old session's token: it showed
+  UNREACHABLE during the restart and then looked connected while every press was refused. Pages now reload
+  themselves when they see a new session.
+- A test of the single-instance guard could check a freshly started fake monitor before it showed its own
+  command line (intermittent on a busy machine); it now waits for it.
+
 ## [1.0.20] - 2026-10-18
 
 ### Fixed

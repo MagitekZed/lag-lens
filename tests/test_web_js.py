@@ -136,6 +136,14 @@ if (!LL || typeof LL.h !== 'function') throw new Error('common.js did not export
 if (LL.token !== 'tok123' || LL.version !== '9.9.9') throw new Error('meta tags not read: ' + LL.token + ' ' + LL.version);
 if (LL.activities.join(',') !== 'idle,bf6,other') throw new Error('activities meta not read: ' + LL.activities);
 if (LL.isStatic !== (mode === 'report')) throw new Error('isStatic wrong for mode ' + mode);
+// a page left open across a restart (new session, new token) reloads itself
+let reloads = 0;
+const bump = () => { reloads++; };
+if (LL.watchSession({ session: { id: 's1' } }, bump) || LL.watchSession({ session: { id: 's1' } }, bump) || reloads)
+  throw new Error('watchSession reloaded for the same session');
+if (!LL.watchSession({ session: { id: 's2' } }, bump) || reloads !== 1) throw new Error('watchSession did not reload on a new session');
+if (LL.watchSession({}, bump) || reloads !== 1) throw new Error('watchSession acted on a state without a session');
+LL.sessionId = null;
 load('app.js'); load('phone.js');
 const out = { mode, fetchCalls: 0, sections: [], dashboard: false, phone: false, title: '' };
 setImmediate(() => setImmediate(() => {   // let the first promise chain settle

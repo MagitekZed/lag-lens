@@ -116,7 +116,7 @@ METHODOLOGY: List[str] = [
     "The parallel witness (NTP direction, IGD WAN counters, DOCSIS log) cannot see the Xbox's own packets; "
     "the Xbox LAN probe only shows whether the console answers on the LAN, not whether its game traffic made it "
     "through.",
-    "DOCSIS: T3/T4 timeouts, ranging, partial service and uncorrectable codeword growth are read from the XB7 "
+    "DOCSIS: T3/T4 timeouts, ranging, partial service and uncorrectable codeword growth are read from the gateway's "
     "status pages every 60 s; the modem log clock offset is measured against the probe host and applied before "
     "correlation (within +/-60 s of an episode).",
     "Health score: 100 - min(40, 20*loss%) - min(25, max(0, p95-p50-10)/4) - min(15, jitter/2) - "

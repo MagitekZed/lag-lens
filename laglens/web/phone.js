@@ -124,6 +124,7 @@
     if (this.group && this.group.follow) this.group.followNow();
   };
   P.applyState = function (st) {
+    if (LL.watchSession(st)) return;
     this.state = st;
     this.lastData = st.now || Date.now() / 1000;
     if (!this.stopped) this.paintPill(st.state, st.pill);

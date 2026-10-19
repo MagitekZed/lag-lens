@@ -273,7 +273,7 @@ class ComcastTextTests(unittest.TestCase):
     def test_without_docsis_or_wan(self):
         text = vm.comcast_text(self.s.ctx, now=T0 + 400)
         self.assertIn("Gateway: XB7 10.0.0.1 | WAN IP: unknown | IPv6 prefix: n/a", text)
-        self.assertIn("DOCSIS snapshot: not collected (XB7 login not configured)", text)
+        self.assertIn("DOCSIS snapshot: not collected (gateway login not configured)", text)
         self.assertIn("Request: no Comcast-side episode recorded yet", text)
 
     def test_loss_columns_from_raw_samples(self):
@@ -321,6 +321,13 @@ class ComcastTextTests(unittest.TestCase):
         st.episodes.append(ep("ep-7", T0 + 320, 9, "unknown"))
         text = vm.comcast_text(s.ctx, now=T0 + 400, write=False)
         self.assertIn("Router (customer-owned): 192.168.0.1 Archer AXE75 | Modem: XB7 in bridge mode firmware 7.3.4.0.114", text)
+        st.set_latest("docsis", {"fw": "Prod_24.2_PD", "ds_snr_min": 36.4, "us_pwr_max": 41.3, "log_lines_seen": 131,
+                                 "model": "XB8", "hw_model": "CGM4981COM", "t": T0})
+        text8 = vm.comcast_text(s.ctx, now=T0 + 400, write=False)
+        self.assertIn("Modem: XB8 (CGM4981COM) in bridge mode firmware Prod_24.2_PD", text8)
+        self.assertIn("T3 ×0, T4 ×0", text8)  # this gateway shows its event log: zero is a real zero
+        st.set_latest("docsis", {"fw": "7.3.4.0.114", "ds_snr_min": 36.4, "us_pwr_max": 41.3, "log_lines_seen": 0,
+                                 "log_clock_offset_s": 3600.0, "t": T0})
         self.assertNotIn("Gateway: XB7", text)
         self.assertIn("Episodes pointing at Comcast's side (local time): 2", text)
         self.assertIn("(5 other episodes left out", text)

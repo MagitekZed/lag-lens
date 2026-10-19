@@ -525,7 +525,7 @@ def persistent_findings(ctx: Any, episodes: List[Episode], now: float) -> List[s
     with state.lock:
         reboots = sum(1 for e in state.events if e.type in ("docsis_reboot", "xb7_reset"))
     if reboots:
-        out.append("XB7 reboot/reset count: %d." % reboots)
+        out.append(state.gw_text("XB7 reboot/reset count: %d." % reboots))
     plex = state.latest("plex")
     if plex:
         out.append(plex_finding(state, plex))
@@ -682,6 +682,8 @@ def comcast_text(ctx: Any, now: Optional[float] = None, episodes: Optional[List[
         gw = host.get("gateway") or (state.target("gw4").addr if state.target("gw4") else None) or "?"
         fw = docsis.get("fw") or docsis.get("firmware")
         model = docsis.get("model") or "XB7"
+        if docsis.get("hw_model") and docsis.get("hw_model") != model:
+            model = "%s (%s)" % (model, docsis["hw_model"])
         wan_ip = wan.get("ext_ip") or igd.get("ext_ip") or "unknown"
         prefix = truncate_prefix(wan.get("v6_prefix") or wan.get("prefix6") or host.get("v6_prefix") or host.get("prefix6")) or "n/a"
         link = "%s" % (host.get("iface") or "?")
@@ -750,9 +752,9 @@ def comcast_text(ctx: Any, now: Optional[float] = None, episodes: Optional[List[
                 ("%.1f dBmV" % float(usp)) if usp is not None else "n/a", uncorr, timeouts, reboots))
             off = docsis.get("log_clock_offset_s")
             if isinstance(off, (int, float)) and not isinstance(off, bool) and not log_hidden:
-                lines.append("XB7 log clock offset: %+d s (log timestamps vs this computer)" % int(round(off)))
+                lines.append(state.gw_text("XB7 log clock offset: %+d s (log timestamps vs this computer)" % int(round(off))))
         else:
-            lines.append("DOCSIS snapshot: not collected (XB7 login not configured)")
+            lines.append("DOCSIS snapshot: not collected (gateway login not configured)")
         lines.append("")
         if relevant:
             what = ("slowed down or dropped packets at the same moments" if any_loss

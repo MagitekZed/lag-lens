@@ -548,9 +548,16 @@ class State:
             gw = t.addr if t is not None else None
         return gateway_is_modem(self.cfg, gw)
 
+    def modem_name(self) -> str:
+        """The gateway's name from its status pages (XB7, XB8, ...); "XB7" until it is known."""
+        d = self.latest("docsis") or {}
+        return str(d.get("model") or "XB7")
+
     def gw_text(self, text: str) -> str:
-        """``text`` with the gateway named for this network (see :func:`gateway_text`)."""
-        return gateway_text(text, self.gateway_is_modem())
+        """``text`` with the gateway named for this network (see :func:`gateway_text`) and the modem by its model."""
+        out = gateway_text(text, self.gateway_is_modem())
+        name = self.modem_name()
+        return out.replace("XB7", name) if out and name != "XB7" else out
 
     def target_by_id(self, tid: int) -> Optional[Target]:
         with self.lock:
