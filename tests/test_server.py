@@ -723,6 +723,31 @@ class MutatingEndpointTests(ServerBase):
         self.jpost("/api/xbox", {"ip": "10.0.0.24"}, status=400)
         self.assertEqual(json.loads(cfg_file.read_text())["targets"]["xbox_ip"], "10.0.0.23")
 
+    def test_plex_settings_keep_the_token_write_only(self):
+        cfg_file = self.tmp / "config.json"
+        cfg_file.write_text(json.dumps({"port": 8787}))
+        self.ctx.config_file = cfg_file
+        tok = "fake-plex-token-123"  # made up
+        self.assertEqual(self.jget("/api/plex")["enabled"], False)  # Plex mode off: a status, not an error
+        body = self.jpost("/api/plex", {"enabled": False, "server": "192.168.0.125", "players": "192.168.0.20=HTPC 192.168.0.30",
+                                        "token": tok})
+        self.assertTrue(body["saved"] and body["token_set"])
+        self.assertNotIn(tok, json.dumps(body))
+        data = json.loads(cfg_file.read_text())
+        self.assertEqual(data["plex"], {"enabled": False, "server": "192.168.0.125", "players": ["192.168.0.20=HTPC", "192.168.0.30"],
+                                        "token": tok})
+        self.assertNotIn(tok, json.dumps(self.jget("/api/plex")))
+        self.assertNotIn(tok, json.dumps(self.jget("/api/state")))
+        self.jpost("/api/plex", {"server": "192.168.0.126"})  # no token in the body: the saved one stays
+        self.assertEqual(json.loads(cfg_file.read_text())["plex"]["token"], tok)
+        self.jpost("/api/plex", {"server": "not an ip"}, status=400)
+        self.jpost("/api/plex", {"players": "192.168.0.20 nonsense"}, status=400)
+        self.jpost("/api/plex", {"token": "has spaces in it"}, status=400)
+        self.post("/api/plex", {"token": "x" * 30}, token=False)  # without the session token: refused
+        self.assertEqual(json.loads(cfg_file.read_text())["plex"]["token"], tok)
+        self.assertFalse(self.jpost("/api/plex", {"clear_token": True})["token_set"])
+        self.assertIsNone(json.loads(cfg_file.read_text())["plex"]["token"])
+
     def test_version_carries_the_update_check_result(self):
         self.state.update = {"available": True, "latest": "9.9.9", "url": "u", "sha256": None, "checked_at": 1.0, "error": None}
         body = self.jget("/api/version")

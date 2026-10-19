@@ -48,11 +48,16 @@ SNAPSHOT_BEFORE_S = 120.0
 SNAPSHOT_AFTER_S = 30.0
 NULL_ASSESSMENT = "Nothing abnormal in the last 10 s on any target: likely game-server side or the Xbox itself."
 SNAPSHOT_ROW_KINDS = ("iface", "wan", "wifi", "dns", "docsis")
-GROUP_ORDER = ("gateway", "xbox", "isp_hop", "mid_hop", "internet")
-GROUP_LABELS = {"gateway": "XB7", "xbox": "Xbox", "isp_hop": "Comcast hop", "mid_hop": "mid-path hop", "internet": "internet"}
+GROUP_ORDER = ("gateway", "xbox", "plex_server", "plex_player", "isp_hop", "mid_hop", "internet")
+GROUP_LABELS = {"gateway": "XB7", "xbox": "Xbox", "plex_server": "Plex server", "plex_player": "Plex player",
+                "isp_hop": "Comcast hop", "mid_hop": "mid-path hop", "internet": "internet"}
+NULL_NETWORK = "Nothing abnormal on the network in the last 10 s."
+PLEX_NOTE_WINDOW = (15.0, 5.0)  # seconds before / after the press
 
 
 def _group_of(t: Target) -> Optional[str]:
+    if t.role in ("plex_server", "plex_player"):
+        return t.role  # the server is a TCP target (Windows drops pings), players are ICMP
     if t.kind != "icmp":
         return None
     if t.role in ("gateway",):
@@ -138,7 +143,7 @@ def assess_window(state: State, t_est: float, before_s: float = ASSESS_BEFORE_S,
             ga.rtt_max = mx if ga.rtt_max is None else max(ga.rtt_max, mx)
             if p50 is not None:
                 ga.base_p50 = p50 if ga.base_p50 is None else min(ga.base_p50, p50)
-                floor = 10.0 if g in ("gateway", "xbox") else (25.0 if g in ("isp_hop", "mid_hop") else 30.0)
+                floor = 10.0 if g in ("gateway", "xbox", "plex_server", "plex_player") else (25.0 if g in ("isp_hop", "mid_hop") else 30.0)
                 thr = max(p50 + 5.0 * (mad or 0.0), 2.0 * p50, p50 + floor)
                 if sum(1 for r in rtts if r > thr) >= 2:
                     ga.spike = True
@@ -147,8 +152,9 @@ def assess_window(state: State, t_est: float, before_s: float = ASSESS_BEFORE_S,
     lost_groups = [g for g in present if groups[g].lost_packets]
     spike_groups = [g for g in present if groups[g].spike and g not in lost_groups]
     fine_groups = [g for g in present if g not in lost_groups and g not in spike_groups and groups[g].answered]
+    plex = plex_context(state, t_est)
     if not lost_groups and not spike_groups:
-        return NULL_ASSESSMENT, groups
+        return ("%s %s" % (NULL_NETWORK, plex) if plex else NULL_ASSESSMENT), groups
     parts: List[str] = []
     if lost_groups:
         first = min(groups[g].first_lost for g in lost_groups if groups[g].first_lost is not None)
@@ -168,7 +174,32 @@ def assess_window(state: State, t_est: float, before_s: float = ASSESS_BEFORE_S,
     sentence = "; ".join(parts)
     if fine_groups:
         sentence += "; %s answered normally" % _join([labels[g] for g in fine_groups])
-    return sentence + ".", groups
+    return sentence + "." + (" " + plex if plex else ""), groups
+
+
+def plex_context(state: State, t_est: float) -> str:
+    """Plex mode: what the server reported around a press (notes, the stream's decision and speed, CPU, tasks)."""
+    row = state.latest("plex")
+    if not row:
+        return ""
+    before, after = PLEX_NOTE_WINDOW
+    with state.lock:
+        notes = [e for e in state.events if e.type.startswith("plex_") and e.note and t_est - before <= e.t0 <= t_est + after]
+    parts = [e.note for e in notes[-3:]]
+    if row.get("token_set"):
+        for sess in row.get("sessions") or []:
+            if sess.get("state") not in ("playing", "buffering"):
+                continue
+            speed = (sess.get("transcode") or {}).get("speed")
+            parts.append("%s %s%s" % (sess.get("player") or "a player", sess.get("decision") or "playing",
+                                      " at %.1fx" % speed if isinstance(speed, (int, float)) and sess.get("decision") != "direct play" else ""))
+        cpu = (row.get("resources") or {}).get("host_cpu")
+        if isinstance(cpu, (int, float)):
+            parts.append("server CPU %d%%" % int(round(cpu)))
+        tasks = [a.get("title") for a in row.get("activities") or [] if a.get("title")]
+        if tasks:
+            parts.append("background task: %s" % ", ".join(tasks[:2]))
+    return ("Plex: %s." % "; ".join(parts)) if parts else ""
 
 
 class MarkService:

@@ -96,7 +96,7 @@ STATUS_GAP = "GAP"
 STATUS_DEGRADED = "DEGRADED"
 STATUS_STOPPED = "STOPPED"
 
-LATEST_KINDS = ("iface", "host", "wifi", "wan", "docsis", "igd", "xbox", "ntp", "dns", "cdn", "path")
+LATEST_KINDS = ("iface", "host", "wifi", "wan", "docsis", "igd", "xbox", "ntp", "dns", "cdn", "path", "plex")
 ROW5_KINDS = ("iface", "host", "wifi", "wan", "ntp", "docsis", "xbox", "slots")
 
 #: Sentinel for "argument not passed" (``State.set_target_state(reason=...)``).
@@ -970,6 +970,13 @@ class State:
                 self.headline = dict(headline)
 
     # ------------------------------------------------------------ snapshot
+    def _activities(self) -> List[str]:
+        """The "Now:" choices; "plex" joins an older config's list while Plex mode runs."""
+        acts = [str(a) for a in ((self.cfg or {}).get("activities") or []) if isinstance(a, str)]
+        if "plex" not in acts and self.latest("plex") is not None:
+            acts.insert(max(0, len(acts) - 1) if acts and acts[-1] == "other" else len(acts), "plex")
+        return acts
+
     def _target_snapshot(self, t: Target, now: float) -> dict:
         d = t.to_dict()
         last = self.last_sample(t.id)
@@ -1014,7 +1021,7 @@ class State:
                 "collectors": {k: dict(v) for k, v in self._collectors.items()},
                 "path": dict(self.path),
                 "activity": dict(self.activity),
-                "activities": [str(a) for a in ((self.cfg or {}).get("activities") or []) if isinstance(a, str)],
+                "activities": self._activities(),
                 "episodes_open": episodes_open,
                 "episodes_recent": recent,
                 "marks_recent": marks_recent,

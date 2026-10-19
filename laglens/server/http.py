@@ -819,6 +819,71 @@ class LagLensHandler(BaseHTTPRequestHandler):
         n = _int(self.q("last"), 20, "last", lo=1, hi=500) or 20
         return self._json(col.recent(n))
 
+    # ----------------------------------------------------------------- plex
+    def h_plex(self, m: Any) -> Response:
+        col = self.sc.component("plex")
+        if col is None or not hasattr(col, "status"):
+            pcfg = (self.sc.ctx.cfg or {}).get("plex") or {}
+            entry = self.sc.state.collector("plex") or {}
+            return self._json({"enabled": False, "reason": entry.get("reason") or "Plex mode is off",
+                               "server": pcfg.get("server"), "players": list(pcfg.get("players") or []),
+                               "token_set": bool(pcfg.get("token"))})
+        return self._json(col.status())
+
+    def h_plex_set(self, m: Any) -> Response:
+        """Setup page: Plex mode on/off, server, players and the token (write-only: never sent back)."""
+        self.require_auth()
+        body = self.body()
+        ctx = self.sc.ctx
+        pcfg = ctx.cfg.setdefault("plex", {}) if isinstance(ctx.cfg, dict) else {}
+        values: Dict[str, Any] = {}
+        if "enabled" in body:
+            values["plex.enabled"] = _bool(body.get("enabled"))
+        if "server" in body:
+            srv = str(body.get("server") or "").strip()
+            host = srv.rsplit(":", 1)[0] if srv.count(":") == 1 else srv
+            if srv:
+                try:
+                    ipaddress.ip_address(host)
+                except ValueError:
+                    raise ApiError(400, "server must be an IP address, optionally with :port", "bad_request")
+            values["plex.server"] = srv or None
+        if "players" in body:
+            raw = body.get("players")
+            items = raw if isinstance(raw, list) else str(raw or "").replace(",", " ").split()
+            players = []
+            for it in items[:8]:
+                ip, _, name = str(it).strip().partition("=")
+                try:
+                    ipaddress.ip_address(ip.strip())
+                except ValueError:
+                    raise ApiError(400, "players must be IP addresses (optionally ip=name)", "bad_request")
+                players.append(ip.strip() + ("=" + name.strip()[:40] if name.strip() else ""))
+            values["plex.players"] = players
+        if body.get("clear_token"):
+            values["plex.token"] = None
+        elif isinstance(body.get("token"), str) and body["token"].strip():
+            tok = body["token"].strip()
+            if len(tok) > 200 or any(c.isspace() for c in tok):
+                raise ApiError(400, "that does not look like a Plex token", "bad_request")
+            values["plex.token"] = tok
+        for dotted, v in values.items():
+            pcfg[dotted.split(".", 1)[1]] = v
+        saved = self._persist_config(values) if values else False
+        started = False
+        if pcfg.get("enabled") and ctx.component("plex") is None:
+            mod = _import("laglens.collectors.plex")
+            if mod is not None:
+                try:
+                    col = mod.PlexCollector(ctx)
+                    col.start()
+                    ctx.components["plex"] = col
+                    started = True
+                except Exception:  # noqa: BLE001
+                    log.exception("cannot start Plex mode")
+        return self._json({"ok": True, "saved": saved, "started": started, "token_set": bool(pcfg.get("token")),
+                           "enabled": bool(pcfg.get("enabled")) or ctx.component("plex") is not None})
+
     def h_igd(self, m: Any) -> Response:
         col = self.sc.component("igd")
         if col is None or not hasattr(col, "status"):
@@ -991,6 +1056,8 @@ LagLensHandler.ROUTES = [
     _route("POST", r"^/api/docsis/refresh$", "h_docsis_refresh"),
     _route("GET", r"^/api/docsis$", "h_docsis"),
     _route("GET", r"^/api/igd$", "h_igd"),
+    _route("GET", r"^/api/plex$", "h_plex"),
+    _route("POST", r"^/api/plex$", "h_plex_set"),
     _route("GET", r"^/api/stats$", "h_stats"),
     _route("GET", r"^/api/verdict$", "h_verdict"),
     _route("GET", r"^/api/comcast\.txt$", "h_comcast"),

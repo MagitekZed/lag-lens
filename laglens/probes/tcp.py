@@ -8,7 +8,8 @@ value (``ECONNREFUSED`` for a closed port). No reply within 3 s → ``F_LOST``.
 Every socket is closed with ``SO_LINGER (1, 0)`` so the kernel sends RST
 instead of leaving TIME_WAIT entries behind.
 
-One connect every 2 s per target, with the first sends staggered across the
+One connect every 2 s per target (faster when the target's ``rate_hz`` asks for
+it, as the Plex server's does), with the first sends staggered across the
 interval. Five refusals in a row back the target off to one connect every
 30 s (``reason='connection refused'`` on the target, probing continues);
 the first success clears it. Five timeouts in a row raise a ``tcp_timeout``
@@ -152,6 +153,11 @@ class TcpProber:
             log.exception("cannot list targets")
             return []
 
+    def _interval_for(self, t: Target) -> float:
+        """The default interval, or a faster one a target asks for (the Plex server: 2 Hz)."""
+        rate = t.rate_hz or 0.0
+        return min(self.interval_s, 1.0 / rate) if rate > 0 else self.interval_s
+
     def _ensure_states(self, targets: List[Target], now: float) -> None:
         n = max(1, len(targets))
         for i, t in enumerate(targets):
@@ -173,7 +179,7 @@ class TcpProber:
         for t in targets:
             ts = self._targets[t.key]
             if now >= ts.next_due:
-                ts.next_due = now + (self.backoff_interval_s if ts.backed_off else self.interval_s)
+                ts.next_due = now + (self.backoff_interval_s if ts.backed_off else self._interval_for(t))
                 if t.enabled and t.addr and not ts.in_flight:
                     self._connect(t, ts, now)
         wait = self._wait_for(now)

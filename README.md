@@ -78,6 +78,22 @@ The file is kept private (mode 600) and the password is only sent to the gateway
 Other optional settings: `targets.xbox_ip` (or choose the Xbox on `/setup`) to watch the console,
 `notify.ntfy_topic` for phone notifications, `link.up_mbps` for your plan's upload speed.
 
+## Plex mode
+
+For stutter when streaming from a Plex server to a player at home (traffic that never passes this
+computer), start with `bash start.sh --plex`, or turn it on under **Setup → Plex mode**. Lag Lens then
+finds the server on the LAN (or uses the IP you give it), watches it on its port 32400 (this works
+even when Windows' firewall drops pings) and watches each player, and a stutter press tells you which
+side dropped. With your Plex token it also reads what the server is doing: Direct Play or Transcode
+and its speed, server CPU, background tasks (scans, thumbnails, intro detection) and when a player
+reports buffering, so a server that cannot keep up is told apart from the network.
+
+To find the token, open Plex in a browser, open any movie or episode and choose ⋯ → Get Info →
+View XML: the address of the page that opens ends in `X-Plex-Token=…`. Paste the part after the `=`
+into the token field on the Setup page. Like the XB7 password, it is stored only in `config.json`
+(mode 600), sent only to your Plex server and redacted from reports, exports and logs. Run Lag Lens
+on a wired computer for this; on Wi-Fi the readings mostly measure the Wi-Fi.
+
 ## Updating
 
 ```sh

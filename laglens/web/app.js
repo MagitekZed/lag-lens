@@ -18,7 +18,7 @@
   var ICMP_ORDER = ['gw4', 'xbox', 'isp_hop4', 'mid_hop4', 'inet4_cf', 'inet4_g', 'gw6', 'isp_hop6', 'inet6_cf', 'inet6_g'];
   var CARD_LABELS = { gw4: 'Gateway', gw6: 'Gateway v6', xbox: 'Xbox', isp_hop4: 'Comcast hop', isp_hop6: 'Comcast hop v6', mid_hop4: 'Mid-path',
     inet4_cf: 'Internet v4', inet4_g: 'Internet v4 (G)', inet6_cf: 'Internet v6', inet6_g: 'Internet v6 (G)' };
-  var CLASS_LIST = ['docsis_access', 'upstream_delay', 'comcast_network', 'xb7_gateway', 'xbox_lan', 'xb7_cpu', 'internet', 'ipv6_only',
+  var CLASS_LIST = ['docsis_access', 'upstream_delay', 'comcast_network', 'xb7_gateway', 'xbox_lan', 'plex_server', 'plex_player', 'home_lan', 'xb7_cpu', 'internet', 'ipv6_only',
     'ipv4_only', 'upload_saturation', 'probe_host', 'probe_link', 'probe_wifi', 'single_destination', 'dns', 'cdn', 'unknown'];
 
   function targetLabel(t) { return CARD_LABELS[t.key] || t.label || t.key; }
@@ -290,6 +290,7 @@
     });
     setInterval(function () { self.tickClock(); }, 1000);
     setInterval(function () { if (self.online && !self.stopped) self.refreshTail(); }, 5000);
+    setInterval(function () { if (self.online && !self.stopped && self.plexOn) self.loadPlex(); }, 5000);
     setInterval(function () { if (self.online && !self.stopped) LL.api.get('/api/state').then(function (st) { self.applyState(st); }).catch(function () { /* SSE/polling handle it */ }); }, 30000);
     doc.addEventListener('keydown', function (ev) {
       if ((ev.key === 'l' || ev.key === 'L') && !ev.metaKey && !ev.ctrlKey && !ev.altKey) {
@@ -406,6 +407,10 @@
     if (this.stack) { this.stack.setEpisodes(this.episodeList(), this.selected); this.stack.setMarks(this.marks); }
     if (st.state === 'STOPPED') this.markStopped();
     if (first) { this.loadDocsis(); this.loadIgd(); }
+    var plexCol = (st.collectors || {}).plex;
+    this.plexOn = !!(plexCol && plexCol.status !== 'disabled');
+    var pp = $('plex-panel'); if (pp) pp.hidden = !this.plexOn;
+    if (first && this.plexOn) this.loadPlex();
     $('a-report').href = '/report.html';
     $('a-export').href = '/export.zip?pack=full&raw=1';
   };
@@ -564,6 +569,38 @@
         ['WAN rx/tx', (d.rx_pegged ? 'n/a (counter clamped by firmware)' : (d.rx_mbps != null ? fmt.mbps(d.rx_mbps) : '—')) + ' / ' + (d.tx_pegged ? 'n/a' : (d.tx_mbps != null ? fmt.mbps(d.tx_mbps) : '—'))],
         ['Mappings', (d.mappings || []).length ? d.mappings.map(function (m) { return m.proto + ' ' + m.ext + '→' + m.int + (m.desc ? ' (' + m.desc + ')' : ''); }).join('; ') : 'none']]));
     }).catch(function (e) { LL.clear(wrap); wrap.appendChild(h('div', { class: 'muted' }, e.message || 'IGD not available')); });
+  };
+
+  D.loadPlex = function () {
+    var wrap = $('plex'); if (!wrap) return;
+    LL.api.get('/api/plex').then(function (p) {
+      LL.clear(wrap);
+      var srv = p.server && typeof p.server === 'object' ? p.server : null;
+      var cnt = p.counts || {}, res = p.resources || {};
+      wrap.appendChild(kv([
+        ['Server', srv ? (srv.name || srv.ip) + ' ' + srv.ip + ':' + (srv.port || 32400) + (p.reachable === false ? ' — not answering' : '') : (p.reason || 'looking…')],
+        ['Status', p.token_set ? (p.token_rejected ? 'token rejected (Setup)' : 'reading server status') : 'no token: probes only (add it in Setup)'],
+        ['Server CPU', res.host_cpu != null ? Math.round(res.host_cpu) + '% host · ' + Math.round(res.plex_cpu || 0) + '% Plex' : null],
+        ['Tasks', (p.activities || []).length ? p.activities.map(function (a) { return a.title + (a.progress != null ? ' ' + Math.round(a.progress) + '%' : ''); }).join('; ') : (p.token_set ? 'none' : null)],
+        ['Players', (p.players || []).length ? p.players.map(function (x) { return (x.name ? x.name + ' ' : '') + x.ip + (x.pingable === false ? ' (no ping)' : x.asleep ? ' (asleep)' : ''); }).join(' · ') : 'none yet'],
+        ['Seen', 'buffering ' + (cnt.buffering || 0) + ' · slow transcode ' + (cnt.transcode_slow || 0) + ' · CPU high ' + (cnt.cpu_high || 0) + ' · server offline ' + (cnt.offline || 0)]]));
+      var ss = p.sessions || [];
+      if (ss.length) {
+        var tb = h('tbody');
+        ss.forEach(function (s) {
+          var tc = s.transcode || {};
+          var dec = (s.decision || '—') + (s.decision !== 'direct play' && tc.speed != null ? ' ' + tc.speed.toFixed(1) + '×' + (tc.throttled ? ' (ahead)' : '') : '');
+          tb.appendChild(h('tr', { class: s.state === 'buffering' || (tc.speed != null && tc.speed < 1 && !tc.throttled) ? 'bad' : '' },
+            h('td', null, s.title), h('td', null, (s.player || '?') + (s.address ? ' ' + s.address : '')), h('td', null, s.state),
+            h('td', null, dec), h('td', { class: 'num' }, s.bitrate_kbps != null ? (s.bitrate_kbps / 1000).toFixed(1) + ' Mb/s' : '—'),
+            h('td', null, s.location === 'wan' || s.relayed ? 'remote' : 'local')));
+        });
+        wrap.appendChild(h('div', { class: 'table-wrap' }, h('table', null, h('thead', null, h('tr', null,
+          ['title', 'player', 'state', 'decision', 'bitrate', 'path'].map(function (x) { return h('th', null, x); }))), tb)));
+      } else if (p.token_set) {
+        wrap.appendChild(h('div', { class: 'small muted' }, 'Nothing playing.'));
+      }
+    }).catch(function (e) { LL.clear(wrap); wrap.appendChild(h('div', { class: 'muted' }, e.message || 'Plex not available')); });
   };
 
   D.episodeList = function () { var self = this; return Object.keys(this.episodes).map(function (k) { return self.episodes[k]; }).sort(function (a, b) { return a.t0 - b.t0; }); };

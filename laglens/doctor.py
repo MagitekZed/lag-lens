@@ -730,6 +730,39 @@ class Doctor:
                       None if "ping" in present else "ping binary missing: no ICMP fallback")]
 
     # -------------------------------------------------------------- suites
+    def c_plex(self) -> List[Dict[str, Any]]:
+        """Plex mode: is the server there, and does the token work? (The token itself is never shown.)"""
+        if self.no_net:
+            return [self._skip("plex")]
+        from laglens.collectors import plex as pmod
+
+        class _Ctx:
+            pass
+
+        c = _Ctx()
+        c.cfg, c.platform, c.store = self.cfg, self.platform, None
+        c.state = type("S", (), {"set_collector": lambda *a, **k: None, "target": lambda *a: None,
+                                 "add_target": lambda *a: None, "set_target_state": lambda *a, **k: None})()
+        col = pmod.PlexCollector(c, pinger=lambda ip: False)
+        if not col.discover():
+            return [check("plex", WARN, col.reason or "no Plex server found", "set the server's IP on the Setup page")]
+        srv = col.server or {}
+        where = "%s at %s:%s" % (srv.get("name"), srv.get("ip"), srv.get("port"))
+        try:
+            col._get("/identity", None)
+        except pmod.PlexError as exc:
+            return [check("plex", FAIL, "%s does not answer: %s" % (where, exc), "is the server PC awake and Plex running?")]
+        tok = col._token()
+        if not tok:
+            return [check("plex", WARN, "%s answers; no token, so server status is off" % where, "add the Plex token on the Setup page")]
+        try:
+            n = len(pmod.parse_sessions(col._get("/status/sessions", tok)))
+        except pmod.PlexError as exc:
+            if exc.code == 401:
+                return [check("plex", WARN, "%s answers but rejects the token" % where, "paste a fresh token on the Setup page")]
+            return [check("plex", WARN, "%s: status failed (%s)" % (where, exc), None)]
+        return [check("plex", OK, "%s; token works; %d stream%s playing" % (where, n, "" if n == 1 else "s"))]
+
     def run(self, fast: bool = False) -> List[Dict[str, Any]]:
         """The ordered check list (``fast`` = the < 3 s subset used at startup)."""
         checks: List[Dict[str, Any]] = []
@@ -746,6 +779,8 @@ class Doctor:
             checks += self._safe(self.c_xbox, "xbox")
             checks += self._safe(self.c_xb7, "xb7_login")
             checks += self._safe(self.c_igd, "igd")
+            if (self.cfg.get("plex") or {}).get("enabled"):
+                checks += self._safe(self.c_plex, "plex")
         checks += self._safe(self.c_inhibitor, "sleep_inhibitor")
         if not fast:
             checks += self._safe(self.c_firewall, "firewall")

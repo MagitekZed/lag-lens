@@ -113,6 +113,9 @@ def _secrets(cfg: Optional[dict], session_dir: Path) -> List[str]:
     pw = ((cfg or {}).get("docsis") or {}).get("password") if isinstance(cfg, dict) else None
     if isinstance(pw, str) and len(pw) >= 3:
         out.append(pw)
+    ptok = ((cfg or {}).get("plex") or {}).get("token") if isinstance(cfg, dict) else None
+    if isinstance(ptok, str) and len(ptok) >= 3 and ptok not in out:
+        out.append(ptok)  # the Plex token, scrubbed like the XB7 password
     # The session's own config (if any) may carry a different password than the live cfg.
     local = sessionsmod._read_json_file(session_dir / "config.json")  # noqa: SLF001 - sibling module helper
     if isinstance(local, dict):

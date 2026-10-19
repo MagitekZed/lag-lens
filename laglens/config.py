@@ -70,6 +70,9 @@ DEFAULTS: Dict[str, Any] = {
         "mappings_interval_s": 300,
     },
     "wifi": {"enabled": "auto", "interval_s": 5},
+    # Plex mode (--plex): watch the Plex server and its players on the home network. ``token`` is the
+    # X-Plex-Token (a secret, like docsis.password); ``players`` are extra player addresses ("ip" or "ip=name").
+    "plex": {"enabled": False, "server": None, "token": None, "players": [], "interval_s": 5},
     "notify": {
         "ntfy_topic": None,
         "webhook_url": None,
@@ -92,7 +95,7 @@ DEFAULTS: Dict[str, Any] = {
     },
     "rotate_hours": 24,
     "warmup_s": 60,
-    "activities": ["idle", "bf6", "rocket_league", "hbo_max", "other"],
+    "activities": ["idle", "bf6", "rocket_league", "hbo_max", "plex", "other"],
     "update_check": True,
     "open_browser": True,
     "label": None,
@@ -104,6 +107,8 @@ _OPTIONAL_STR_KEYS = {
     "docsis.password",
     "notify.ntfy_topic",
     "notify.webhook_url",
+    "plex.server",
+    "plex.token",
     "label",
 }
 

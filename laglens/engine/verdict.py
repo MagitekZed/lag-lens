@@ -27,7 +27,8 @@ MIN_EPISODE_S = 1.5
 INFO_CLASSES = frozenset({"xb7_cpu", "hop_rate_limit"})
 EXCLUDED_FROM_TALLY = INFO_CLASSES | frozenset({"loadtest"})
 COMCAST_CLASSES = frozenset({"docsis_access", "comcast_network", "xb7_gateway"})
-HOME_CLASSES = frozenset({"probe_host", "probe_wifi", "probe_link", "xbox_lan", "upload_saturation"})
+HOME_CLASSES = frozenset({"probe_host", "probe_wifi", "probe_link", "xbox_lan", "upload_saturation",
+                          "plex_server", "plex_player", "home_lan"})
 INTERNET_CLASSES = frozenset({"internet", "single_destination", "cdn", "dns"})
 HEADLINE_SHARE = 0.6
 CLASS_LABELS: Dict[str, str] = {
@@ -36,6 +37,9 @@ CLASS_LABELS: Dict[str, str] = {
     "loadtest": "load test",
     "probe_link": "this computer's network link",
     "xbox_lan": "the Xbox LAN cable/port",
+    "plex_server": "the Plex server",
+    "plex_player": "the Plex player",
+    "home_lan": "the home network between the Plex server and the player",
     "xb7_cpu": "XB7 CPU (informational)",
     "xb7_gateway": "the XB7 gateway",
     "docsis_access": "the cable line / Comcast access network",
@@ -88,6 +92,32 @@ NEXT_STEPS: Dict[str, List[dict]] = {
         {"try": "Check the Xbox's negotiated link speed in its network settings",
          "confirm_if": "it shows 100 Mb/s or half duplex",
          "refute_if": "it shows 1 Gb/s full duplex"},
+    ],
+    "plex_server": [
+        {"try": "Open the Plex dashboard while it stutters: a Transcode under 1.0x speed, high CPU or a background task "
+                "(library scan, thumbnails, intro/credit detection) means the server PC cannot keep up",
+         "confirm_if": "the stutters line up with transcoding, CPU peaks or a task; Direct Play or scheduling the tasks overnight stops them",
+         "refute_if": "Direct Play, low CPU and no tasks, yet the server still drops off the network"},
+        {"try": "On the server PC: turn off sleep and the network adapter's power saving / Energy-Efficient Ethernet, "
+                "and swap its Ethernet cable or switch port",
+         "confirm_if": "the drop-outs stop",
+         "refute_if": "they continue with a new cable and power saving off"},
+        {"try": "Check the drive the media is on: an external or sleeping disk takes seconds to spin up",
+         "confirm_if": "the stutters line up with the disk waking (first seconds of a title, after pauses)",
+         "refute_if": "they happen mid-playback with the disk awake"},
+    ],
+    "plex_player": [
+        {"try": "Swap the player's Ethernet cable and router/switch port; check it negotiates 1 Gb/s",
+         "confirm_if": "its drop-outs stop with the new cable/port",
+         "refute_if": "the player still drops while the server and router stay clean"},
+        {"try": "Play the same title on another player",
+         "confirm_if": "the other player plays it smoothly",
+         "refute_if": "the other player stutters at the same moments"},
+    ],
+    "home_lan": [
+        {"try": "Plug the Plex server and the player straight into the router (skip any extra switch) and replay",
+         "confirm_if": "the stutters stop: the switch or a shared cable is at fault",
+         "refute_if": "both still drop together while plugged into the router"},
     ],
     "probe_link": [
         {"try": "Move the probe host to a different XB7 port / cable (or wired instead of Wi-Fi)",
@@ -352,6 +382,15 @@ def sentence_where(cls: str, band: str, episodes: List[Episode], top: List[dict]
     if cls == "xbox_lan":
         return ("%s only the Xbox stopped answering while the XB7 and the internet were fine, which %s the Xbox's cable, "
                 "port or the console itself." % (of, hedge))
+    if cls == "plex_server":
+        return ("%s only the Plex server stopped answering or slowed down while the router and the player were fine, which "
+                "%s the server PC itself (busy, asleep or its network connection)." % (of, hedge))
+    if cls == "plex_player":
+        return ("%s only the Plex player stopped answering while the router and the server were fine, which %s the player's "
+                "cable, port or the device itself." % (of, hedge))
+    if cls == "home_lan":
+        return ("%s the Plex server and the player dropped together while the router answered normally, which %s the "
+                "cabling or switch they share." % (of, hedge))
     if cls == "probe_link":
         return ("%s this computer's own link flapped or lost the gateway and the Xbox together, which %s this computer's "
                 "connection, not the internet." % (of, hedge))
@@ -407,6 +446,38 @@ def sentence_marks(state: State) -> Tuple[str, int, int]:
     return s, total, linked
 
 
+def plex_finding(state: State, plex: dict) -> str:
+    """One sentence on what the Plex server reported this session (buffering, transcoding, CPU, tasks)."""
+    if not plex.get("token_set"):
+        return ("Plex: server status is off (no Plex token), so transcoding, CPU and buffering are not visible; "
+                "only the server's and players' network answers are watched.")
+    with state.lock:
+        evs = [e for e in state.events if e.type.startswith("plex_")]
+    n = {k: sum(1 for e in evs if e.type == k) for k in ("plex_buffering", "plex_transcode_slow", "plex_cpu_high", "plex_offline", "plex_remote")}
+    parts = []
+    parts.append("%d buffering moment%s reported by the server" % (n["plex_buffering"], "" if n["plex_buffering"] == 1 else "s")
+                 if n["plex_buffering"] else "no buffering reported by the server")
+    if n["plex_transcode_slow"]:
+        speeds = [e.peak.get("speed") for e in evs if e.type == "plex_transcode_slow" and isinstance(e.peak.get("speed"), (int, float))]
+        parts.append("the server fell behind transcoding %d time%s%s" % (
+            n["plex_transcode_slow"], "" if n["plex_transcode_slow"] == 1 else "s",
+            " (slowest %.1fx real time)" % min(speeds) if speeds else ""))
+    if n["plex_cpu_high"]:
+        cpus = [e.peak.get("cpu") for e in evs if e.type == "plex_cpu_high" and isinstance(e.peak.get("cpu"), (int, float))]
+        parts.append("server CPU went over 90%%%s" % (" (peak %d%%)" % int(round(max(cpus))) if cpus else ""))
+    tasks = sorted({str(e.peak.get("task")) for e in evs if e.type == "plex_activity" and e.peak.get("task")})
+    if tasks:
+        parts.append("background tasks ran: %s" % ", ".join(tasks[:4]))
+    if n["plex_offline"]:
+        parts.append("the server stopped answering %d time%s" % (n["plex_offline"], "" if n["plex_offline"] == 1 else "s"))
+    if n["plex_remote"]:
+        parts.append("%d stream%s left the home network (remote or relayed)" % (n["plex_remote"], "" if n["plex_remote"] == 1 else "s"))
+    decisions = sorted({str(s.get("decision")) for s in plex.get("sessions") or [] if s.get("decision")})
+    if decisions:
+        parts.append("now playing as %s" % " and ".join(decisions))
+    return "Plex: %s." % "; ".join(parts)
+
+
 def persistent_findings(ctx: Any, episodes: List[Episode], now: float) -> List[str]:
     """Link speed/duplex, Xbox link, IPv6, DOCSIS levels, reboots, activity split, hour-of-day concentration."""
     state: State = ctx.state
@@ -455,6 +526,9 @@ def persistent_findings(ctx: Any, episodes: List[Episode], now: float) -> List[s
         reboots = sum(1 for e in state.events if e.type in ("docsis_reboot", "xb7_reset"))
     if reboots:
         out.append("XB7 reboot/reset count: %d." % reboots)
+    plex = state.latest("plex")
+    if plex:
+        out.append(plex_finding(state, plex))
     # per-activity split
     try:
         from laglens.engine import rollup as rollupmod
@@ -750,7 +824,9 @@ def _headline(ctx: Any, now: Optional[float] = None) -> dict:
             return {"answer": "yes_comcast", "text": "%s — %s" % (qual, where), "action": action}
         if cls in HOME_CLASSES:
             where = {"xbox_lan": "Xbox cable/port", "probe_link": "this computer's link", "probe_wifi": "this computer's Wi-Fi",
-                     "probe_host": "this computer", "upload_saturation": "upload saturation at home"}[cls]
+                     "probe_host": "this computer", "upload_saturation": "upload saturation at home",
+                     "plex_server": "the Plex server", "plex_player": "the Plex player",
+                     "home_lan": "the network between the Plex server and the player"}[cls]
             return {"answer": "yes_home", "text": "%s — your home (%s)" % (qual, where), "action": action}
         if cls == "upstream_delay":
             return {"answer": "unknown", "text": "%s — upload delay past your modem (a home upload or Comcast's upstream)" % qual,

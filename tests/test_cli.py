@@ -249,7 +249,7 @@ class RunTests(unittest.TestCase):
     def test_components_order_has_ntp_after_dns_before_cdn(self):
         names = [c[0] for c in app.COMPONENTS]
         self.assertEqual(names[:7], ["engine", "tracer", "tcp", "dns", "ntp", "cdn", "host"])
-        self.assertEqual(names[-6:], ["igd", "ticker", "report", "http", "keepawake", "notify"])
+        self.assertEqual(names[-7:], ["igd", "plex", "ticker", "report", "http", "keepawake", "notify"])
         self.assertIn(("ntp", "laglens.probes.ntp", "NtpProber", "class"), app.COMPONENTS)
 
     def test_rotation_stops_with_reason_rotate_and_cmd_run_starts_a_new_session(self):

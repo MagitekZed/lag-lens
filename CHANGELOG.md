@@ -3,6 +3,29 @@
 All notable changes to Lag Lens are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and versions follow SemVer.
 
+## [1.0.16] - 2026-10-18
+
+### Added
+- Plex mode (`bash start.sh --plex`, or Setup → Plex mode) for stutter streaming between two devices at
+  home. Lag Lens finds the Plex Media Server on the LAN by GDM (or uses `plex.server`), watches it on
+  port 32400 at 2 Hz (a TCP connect, so Windows' firewall dropping pings does not matter) and watches
+  each player by ping (`plex.players`, plus every player seen in a session; a player that stops
+  answering while it is not playing is taken as asleep).
+- With the Plex token (`plex.token`, entered on the Setup page, write-only, kept in `config.json` and
+  redacted like the XB7 password) it reads the server's sessions (Direct Play / Direct Stream /
+  Transcode, transcoder speed and throttling, bitrate, local or remote), CPU and background tasks, and
+  notes when a player reports buffering, when the transcoder falls under real time, CPU above 90 %, a
+  background task starting, a stream leaving the LAN, and the server going offline.
+- New episode classes: the Plex server alone, a player alone, and both together while the router is
+  fine (the switch or cabling they share), with next steps. Episodes and "Lag happened" presses carry
+  what Plex reported at that moment (for example "HTPC transcode at 0.7x; server CPU 96%"), the
+  verdict adds a Plex summary sentence, and the dashboard has a Plex panel. "Plex" joins the
+  activities, and the doctor checks the server and the token.
+
+### Changed
+- The TCP prober honours a faster rate when a target asks for one (the Plex server's 2 Hz); every
+  other TCP target keeps one connect every 2 s.
+
 ## [1.0.15] - 2026-10-12
 
 ### Fixed

@@ -41,6 +41,32 @@
     </div>
   </div>
 
+  <div class="panel" id="plex-setup">
+    <h2>Plex mode</h2>
+    <div id="plex-now" class="muted">loading…</div>
+    <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
+      <label><input id="plex-on" type="checkbox"> Watch the Plex server and its players</label>
+    </div>
+    <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+      <input id="plex-server" type="text" inputmode="decimal" placeholder="server IP (blank: find it on the LAN)" autocomplete="off" style="min-width:240px">
+      <input id="plex-players" type="text" placeholder="players, e.g. 192.168.0.20=HTPC 192.168.0.30=PS5" autocomplete="off" style="min-width:320px">
+    </div>
+    <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+      <input id="plex-token" type="password" placeholder="Plex token (leave blank to keep the saved one)" autocomplete="off" spellcheck="false" style="min-width:320px">
+      <button id="btn-plex" type="button" class="primary">Save</button>
+      <button id="btn-plex-forget" type="button" class="small">Forget token</button>
+      <span id="plex-msg" class="small muted"></span>
+    </div>
+    <div class="hint" style="margin-top:8px">
+      Plex mode watches the Plex server (on its port 32400, which works even when Windows' firewall drops pings) and
+      each player, and with a token reads what the server is doing: Direct Play or Transcode and its speed, CPU,
+      background tasks and buffering. To find the token: open Plex in a browser, open any movie or episode, choose
+      ⋯ → Get Info → View XML; the address of the page that opens ends in <code>X-Plex-Token=…</code>. Paste the part
+      after the <code>=</code> here. It is saved in <code>config.json</code> on this computer only (mode 600), sent
+      only to your Plex server, and never shown, logged or exported. Players in a session are added automatically.
+    </div>
+  </div>
+
   <div class="panel">
     <h2>Config hints</h2>
     <div id="hints"><span class="muted">loading…</span></div>
@@ -92,6 +118,48 @@
     }).catch(function (e) { msg.textContent = e.message || 'failed'; LL.toast(e.message || 'failed', 'bad'); });
   }
 
+  function renderPlex(p) {
+    var now = $('plex-now'); LL.clear(now);
+    p = p || {};
+    var srv = p.server;
+    $('plex-on').checked = !!p.enabled;
+    if (srv && typeof srv === 'object') {
+      now.appendChild(h('div', null, 'Server ', h('b', null, srv.name || srv.ip), ' ', h('span', { class: 'mono' }, srv.ip + ':' + (srv.port || 32400)),
+        ' · ', p.reachable === false ? h('b', { class: 'bad' }, 'not answering') : 'answering',
+        ' · token ', p.token_set ? (p.token_rejected ? h('b', { class: 'bad' }, 'rejected') : 'saved') : h('b', null, 'not set')));
+      if (!$('plex-server').value && srv.source === 'config') $('plex-server').value = srv.ip + (srv.port && srv.port !== 32400 ? ':' + srv.port : '');
+    } else {
+      now.appendChild(h('div', null, p.enabled ? 'Looking for the Plex server…' : 'Plex mode is off.', p.reason ? h('span', { class: 'muted' }, ' — ' + p.reason) : null,
+        ' · token ', p.token_set ? 'saved' : h('b', null, 'not set')));
+      if (!$('plex-server').value && typeof p.server === 'string') $('plex-server').value = p.server;
+    }
+    var pl = p.players || [];
+    if (pl.length && typeof pl[0] === 'object') {
+      now.appendChild(h('div', { class: 'small' }, 'Players: ' + pl.map(function (x) {
+        return (x.name ? x.name + ' ' : '') + x.ip + (x.pingable === false ? ' (no ping)' : x.asleep ? ' (asleep)' : '');
+      }).join(' · ')));
+    } else if (pl.length && !$('plex-players').value) {
+      $('plex-players').value = pl.join(' ');
+    }
+  }
+
+  function savePlex(extra) {
+    var msg = $('plex-msg');
+    var body = Object.assign({ enabled: $('plex-on').checked, server: ($('plex-server').value || '').trim(),
+      players: ($('plex-players').value || '').trim() }, extra || {});
+    var tok = ($('plex-token').value || '').trim();
+    if (tok && !body.clear_token) body.token = tok;
+    msg.textContent = 'saving…';
+    LL.api.post('/api/plex', body).then(function (r) {
+      $('plex-token').value = '';  // never keep the token in the page
+      msg.textContent = (r.saved ? 'saved' : 'applied for this run') + (r.started ? ' · Plex mode started' : '') + (r.token_set ? ' · token saved' : ' · no token');
+      LL.toast('Plex settings saved', 'ok');
+      setTimeout(loadPlex, 1500);
+    }).catch(function (e) { msg.textContent = e.message || 'failed'; LL.toast(e.message || 'failed', 'bad'); });
+  }
+
+  function loadPlex() { LL.api.get('/api/plex').then(renderPlex).catch(function () { $('plex-now').textContent = 'Plex status unavailable'; }); }
+
   function renderHints(st) {
     var wrap = $('hints'); LL.clear(wrap);
     var ul = h('ul');
@@ -137,11 +205,14 @@
   }
   $('btn-xbox').addEventListener('click', function () { var v = ($('xbox-ip').value || '').trim(); if (v) setIp(v); });
   $('xbox-ip').addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); $('btn-xbox').click(); } });
+  $('btn-plex').addEventListener('click', function () { savePlex(); });
+  $('btn-plex-forget').addEventListener('click', function () { $('plex-token').value = ''; savePlex({ clear_token: true }); });
   $('btn-doctor').addEventListener('click', function () {
     $('doctor-ran').textContent = 'running…';
     LL.api.post('/api/doctor/run').then(renderDoctor).catch(function (e) { $('doctor-ran').textContent = e.message || 'failed'; });
   });
   load();
+  loadPlex();
 })();
 </script>
 </body>

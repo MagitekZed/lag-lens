@@ -65,6 +65,9 @@ TROUBLE_PHRASES = {
     "comcast_network": "packets lost in Comcast's network",
     "xb7_gateway": "your XB7 gateway stopped answering",
     "xbox_lan": "the Xbox stopped answering",
+    "plex_server": "the Plex server stopped answering",
+    "plex_player": "the Plex player stopped answering",
+    "home_lan": "the Plex server and player dropped together",
     "probe_link": "this computer's link dropped",
     "probe_wifi": "this computer's Wi-Fi dropped",
     "probe_host": "this computer stalled",
@@ -83,7 +86,8 @@ TROUBLE_PHRASES = {
 }
 RECENT_PHRASES = {
     "docsis_access": "Comcast hop", "comcast_network": "Comcast network", "xb7_gateway": "XB7 gateway",
-    "xbox_lan": "Xbox LAN", "probe_link": "this computer's link", "probe_wifi": "this computer's Wi-Fi",
+    "xbox_lan": "Xbox LAN", "plex_server": "Plex server", "plex_player": "Plex player", "home_lan": "home network",
+    "probe_link": "this computer's link", "probe_wifi": "this computer's Wi-Fi",
     "probe_host": "this computer", "upload_saturation": "upload saturation", "upstream_delay": "upload delay", "ipv6_only": "IPv6",
     "ipv4_only": "IPv4", "internet": "internet", "single_destination": "one destination", "dns": "DNS", "cdn": "CDN",
     "hop_rate_limit": "hop rate limit", "xb7_cpu": "XB7 CPU", "loadtest": "load test", "unknown": "unclassified",

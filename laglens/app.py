@@ -78,6 +78,7 @@ COMPONENTS: List[Tuple[str, str, str, str]] = [
     ("xbox", "laglens.collectors.xbox", "XboxCollector", "class"),
     ("docsis", "laglens.collectors.docsis", "DocsisCollector", "class"),
     ("igd", "laglens.collectors.igd", "IgdCollector", "class"),
+    ("plex", "laglens.collectors.plex", "PlexCollector", "class"),
     ("ticker", "laglens.engine.ticker", "Ticker", "class"),
     ("report", "laglens.report.build", "ReportBuilder", "class"),
     ("http", "laglens.server.http", "serve", "func"),
@@ -138,6 +139,8 @@ class AppContext:
         if name == "notify":
             n = self.cfg.get("notify", {})
             return bool(n.get("ntfy_topic") or n.get("webhook_url"))
+        if name == "plex":
+            return bool(getattr(a, "plex", False)) or bool((self.cfg.get("plex") or {}).get("enabled"))
         return True
 
 
@@ -162,6 +165,8 @@ def load_app_config(args: argparse.Namespace, create: bool = True) -> dict:
         overrides["targets.xbox_ip"] = args.xbox
     if getattr(args, "no_browser", False):
         overrides["open_browser"] = False
+    if getattr(args, "plex", False):
+        overrides["plex.enabled"] = True
     return configmod.load_config(path, overrides)
 
 
@@ -509,6 +514,7 @@ def _start_components(ctx: AppContext, components: List[Tuple[str, str, str, str
                 "docsis": "docsis.password not set" if not getattr(ctx.args, "no_docsis", False) else "disabled by --no-docsis",
                 "igd": "disabled by --no-igd" if getattr(ctx.args, "no_igd", False) else "igd.enabled is false",
                 "notify": "not configured",
+                "plex": "off (start with --plex, or turn Plex mode on in Setup)",
             }.get(name, "disabled in config")
             st.set_collector(name, "disabled", reason=reason)
             continue
@@ -899,7 +905,7 @@ def run(
     plat = platform or get_platform()
     store, resumed = _session_dir_for(args, sessions_root, cfg, {})
     setup_logging(store.dir, args.verbose if hasattr(args, "verbose") else False,
-                  secrets=[cfg.get("docsis", {}).get("password")])
+                  secrets=[cfg.get("docsis", {}).get("password"), (cfg.get("plex") or {}).get("token")])
     log.info("Lag Lens %s starting; session %s%s", __version__, store.dir, " (resume)" if resumed else "")
 
     session_id = store.dir.name

@@ -545,7 +545,7 @@ class Detector:
         interval = self._interval(target)
         window = 8 + (1 if pingbin else 0)
         consec = 3 + (1 if pingbin else 0)
-        need = 3 if target.role in ("gateway", "xbox") else 2
+        need = 3 if target.role in ("gateway", "xbox", "plex_server", "plex_player") else 2
         elapsed = self._elapsed(edge)
         loss_ok = elapsed >= WARMUP_LOSS_S
         b = self.baselines.get(tid)

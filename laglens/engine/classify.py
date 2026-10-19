@@ -69,7 +69,11 @@ LOCUS_SHARE = 0.7
 CONF_CAP = 0.95
 SINGLE_SIGNAL_PENALTY = 0.2
 #: Noise floors (ms) by role (SPEC §7.1).
-FLOOR_BY_ROLE = {"gateway": 10.0, "xbox": 10.0, "isp_hop": 25.0, "mid_hop": 25.0}
+FLOOR_BY_ROLE = {"gateway": 10.0, "xbox": 10.0, "isp_hop": 25.0, "mid_hop": 25.0, "plex_server": 10.0, "plex_player": 10.0}
+#: Roles on the home network itself (noise floor ``max(10 ms, 5·MAD)``).
+LAN_ROLES = ("gateway", "xbox", "plex_server", "plex_player")
+#: Plex mode targets (``laglens.collectors.plex``): the server (TCP :32400) and its players (ICMP).
+PLEX_ROLES = ("plex_server", "plex_player")
 DEFAULT_FLOOR = 30.0
 CLEAN_LOSS_PCT = 2.0
 AFFECTED_LOSS_PCT = 10.0
@@ -82,7 +86,7 @@ MAX_MATRIX_SLOTS = 2400  # 10 min
 def floor_for(role: str, mad: Optional[float] = None) -> float:
     """Noise floor for a role; gateway/xbox use ``max(10 ms, 5·MAD)``."""
     base = FLOOR_BY_ROLE.get(role, DEFAULT_FLOOR)
-    if role in ("gateway", "xbox") and mad is not None:
+    if role in LAN_ROLES and mad is not None:
         return max(base, 5.0 * mad)
     return base
 
@@ -954,6 +958,80 @@ def gw4_inflation(f: Features) -> Tuple[bool, Optional[float], Optional[float]]:
     return held, x, hop.d_p95
 
 
+def _plex_views(f: Features, role: str) -> List[TargetView]:
+    return [v for v in f.views.values() if v.known and v.target.role == role]
+
+
+def _plex_evidence_conf(f: Features, r: RuleResult, base: float) -> None:
+    """Server-side Plex notes around the episode back a server finding."""
+    types = {e.type for e in f.nearby if e.type.startswith("plex_")}
+    r.confidence = base + (0.1 if types & {"plex_cpu_high", "plex_activity", "plex_transcode_slow", "plex_offline"} else 0.0)
+
+
+def rule_plex_server(f: Features) -> RuleResult:
+    """Plex mode: only the Plex server stopped answering or slowed down; the router and the player were fine."""
+    r = RuleResult("plex_server")
+    srv = [v for v in _plex_views(f, "plex_server") if v.affected]
+    if not srv:
+        return r  # score 0: never the runner-up when Plex mode is off or the server was fine
+    r.need(f.is_clean("gw4") is not False, "gateway not clean")
+    players = _plex_views(f, "plex_player")
+    r.need(not any(v.affected for v in players), "a player was affected too")
+    beyond = f.beyond_gateway()
+    r.need(_all_clean(beyond), "targets beyond the gateway affected: %s" % ", ".join(v.key for v in beyond if not v.clean))
+    if r.failed:
+        return r
+    r.ok = True
+    _plex_evidence_conf(f, r, 0.7)
+    r.signals.update(["plex_server", "gw_clean"])
+    r.evidence.append("only the Plex server was affected: %s" % srv[0].describe())
+    for v in players[:2]:
+        r.evidence.append("the player answered normally: %s" % v.describe())
+    return r
+
+
+def rule_plex_player(f: Features) -> RuleResult:
+    """Plex mode: only a player stopped answering or slowed down; the router and the server were fine."""
+    r = RuleResult("plex_player")
+    pl = [v for v in _plex_views(f, "plex_player") if v.affected]
+    if not pl:
+        return r  # score 0 (see rule_plex_server)
+    r.need(f.is_clean("gw4") is not False, "gateway not clean")
+    srv = _plex_views(f, "plex_server")
+    r.need(not any(v.affected for v in srv), "the Plex server was affected too")
+    beyond = f.beyond_gateway()
+    r.need(_all_clean(beyond), "targets beyond the gateway affected: %s" % ", ".join(v.key for v in beyond if not v.clean))
+    if r.failed:
+        return r
+    r.ok = True
+    r.confidence = 0.7
+    r.signals.update(["plex_player", "gw_clean"])
+    r.evidence.append("only the player was affected: %s" % pl[0].describe())
+    for v in srv[:1]:
+        r.evidence.append("the Plex server answered normally: %s" % v.describe())
+    return r
+
+
+def rule_home_lan(f: Features) -> RuleResult:
+    """Plex mode: the server and a player suffered together while the router answered normally."""
+    r = RuleResult("home_lan")
+    srv = [v for v in _plex_views(f, "plex_server") if v.affected]
+    pl = [v for v in _plex_views(f, "plex_player") if v.affected]
+    if not (srv and pl):
+        return r  # score 0 (see rule_plex_server)
+    r.need(f.is_clean("gw4") is not False, "gateway not clean")
+    beyond = f.beyond_gateway()
+    r.need(_all_clean(beyond), "targets beyond the gateway affected: %s" % ", ".join(v.key for v in beyond if not v.clean))
+    if r.failed:
+        return r
+    r.ok = True
+    r.confidence = 0.55
+    r.signals.update(["plex_server", "plex_player", "gw_clean"])
+    r.evidence.append("the Plex server and the player suffered together (%s; %s) while the router answered normally: "
+                      "the cabling or switch they share" % (srv[0].describe(), pl[0].describe()))
+    return r
+
+
 def rule_xb7_cpu(f: Features) -> RuleResult:
     r = RuleResult("xb7_cpu")
     r.info = True
@@ -1327,7 +1405,8 @@ def rule_unknown(f: Features) -> RuleResult:
     return r
 
 
-RULES = [rule_probe_host, rule_probe_wifi, rule_loadtest, rule_probe_link, rule_probe_wifi_link, rule_xbox_lan, rule_xb7_cpu,
+RULES = [rule_probe_host, rule_probe_wifi, rule_loadtest, rule_probe_link, rule_probe_wifi_link, rule_xbox_lan,
+         rule_home_lan, rule_plex_server, rule_plex_player, rule_xb7_cpu,
          rule_xb7_gateway, rule_upstream_delay, rule_docsis_access, rule_comcast_network, rule_upload_saturation, rule_ip_family,
          rule_internet, rule_single_destination, rule_hop_rate_limit, rule_dns, rule_cdn, rule_unknown]
 INFO_CLASSES = frozenset({"xb7_cpu", "hop_rate_limit"})
@@ -1364,6 +1443,9 @@ def common_evidence(f: Features) -> List[str]:
         out.append("host tags: %s" % ", ".join(f.host_tags))
     if f.xbox_state == "asleep":
         out.append("Xbox asleep during the episode")
+    for e in f.nearby:
+        if e.type.startswith("plex_") and e.note and f.t0 - 15 <= e.t0 <= f.t1 + 15:
+            out.append("Plex %s: %s" % (time.strftime("%H:%M:%S", time.localtime(e.t0)), e.note))
     return out
 
 
