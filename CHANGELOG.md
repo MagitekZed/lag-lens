@@ -3,6 +3,17 @@
 All notable changes to Lag Lens are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and versions follow SemVer.
 
+## [1.0.20] - 2026-10-18
+
+### Fixed
+- A gateway that refuses the admin login (a wrong `docsis.password`, for example after swapping the gateway)
+  answers with an alert and `history.back()` rather than the login form, and Lag Lens took that for a
+  successful login: it then fetched logged-out pages, fell back to page names the gateway does not serve
+  (timeouts) and logged in again every minute, which kept the gateway's admin login locked after 3 failed
+  attempts. The refusal is now recognised, no other login path is tried (each try counts as a failed
+  attempt), and the modem reader pauses for 60 minutes with the gateway's own words and what to fix
+  ("update docsis.password in config.json"). `--docsis-dump` says the same.
+
 ## [1.0.19] - 2026-10-18
 
 ### Fixed

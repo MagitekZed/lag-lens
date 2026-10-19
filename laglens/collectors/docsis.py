@@ -55,6 +55,11 @@ HTTP_TIMEOUT_S = 10.0
 LOGIN_FAILURES_BEFORE_PAUSE = 3
 LOGIN_PAUSE_S = 600.0
 LOGIN_REJECTED_CHIP = "XB7: login rejected, retry in 10 min"
+# A gateway that says no (wrong password, or locked after failed attempts) is asked again only after this long:
+# RDK-B gateways lock the admin login after 3 failed attempts, so retrying every poll keeps it locked.
+LOGIN_REFUSED_PAUSE_S = 3600.0
+PASSWORD_REJECTED = ("XB7: the gateway rejected the password (%s); update docsis.password in config.json and restart "
+                     "Lag Lens; next try in 60 min")
 PAGE_404_DROP_AFTER = 3
 REFRESH_RATE_LIMIT_S = 60.0
 REFRESH_SECOND_POLL_S = 15.0
@@ -207,6 +212,21 @@ _LOGGED_IN_RX = re.compile(r'<a\b[^>]*\bhref\s*=\s*["\']home_loggedout\.jst["\']
 # What an unauthenticated status page actually is: a script whose only job is to bounce to the logout page.
 _REDIRECT_ONLY_RX = re.compile(r'<script[^>]*>\s*(?:alert\w*\s*\([^)]*\)\s*;?\s*)?(?:window\.)?location(?:\.href)?\s*=\s*'
                                r'["\']home_loggedout\.jst["\']\s*;?\s*</script>', re.I)
+
+
+# How an RDK-B gateway refuses a login: a script that alerts and goes back, e.g.
+# alert($.i18n("You have ")+"3"+$.i18n(" failed login attempts and your account will be locked for ")+"5"+...);history.back();
+_LOGIN_ALERT_RX = re.compile(r"alert\w*\s*\((.{0,600}?)\)\s*;?\s*history\.back\s*\(\s*\)", re.I | re.S)
+
+
+def login_alert(html: str) -> Optional[str]:
+    """The gateway's own words when it refuses a login (an alert followed by ``history.back()``), else ``None``."""
+    m = _LOGIN_ALERT_RX.search(html or "")
+    if not m:
+        return None
+    parts = re.findall(r'"([^"]*)"|\'([^\']*)\'', m.group(1))
+    text = re.sub(r"\s+", " ", "".join(a or b for a, b in parts)).strip()
+    return text or "login refused"
 
 
 def logged_out(html: str) -> bool:
@@ -674,6 +694,7 @@ class Xb7Client:
             raise
         form = {"username": self.username, "password": self._password, "locale": "false"}
         self.login_diag: List[Dict[str, Any]] = []
+        self.refused: Optional[str] = None  # the gateway's words when it says no (see login_alert)
         for lp in self.login_paths:
             try:
                 code, body = self.post(lp, form)
@@ -686,6 +707,14 @@ class Xb7Client:
             if code == 404:
                 self.login_diag.append(diag)
                 continue
+            refused = login_alert(body)
+            if refused:
+                # a definite no: trying the other login paths would only add failed attempts toward the lockout
+                diag["refused"] = refused
+                self.login_diag.append(diag)
+                self.refused = refused
+                log.warning("docsis: %s refused the login: %s", self.base, refused)
+                return False
             ok = False
             if code < 400 and body.strip() and not logged_out(body):
                 ok = True
@@ -865,6 +894,16 @@ class DocsisCollector:
         if ok:
             self._login_failures = 0
             return True
+        refused = getattr(self.client, "refused", None)
+        if refused:
+            reason = PASSWORD_REJECTED % refused
+            with self._lock:
+                self._paused_until = self._mono() + LOGIN_REFUSED_PAUSE_S
+                self._extra.clear()
+            self._login_failures = 0
+            self.state.set_collector(self.name, "degraded", reason=reason)
+            log.warning("docsis: %s", reason)
+            return False
         self._login_failures += 1
         if self._login_failures >= LOGIN_FAILURES_BEFORE_PAUSE:
             with self._lock:
@@ -1161,6 +1200,8 @@ def dump_cli(cfg: dict, out_dir: Optional[Path] = None, client: Optional[Xb7Clie
             continue
         out("login POST %s: HTTP %s, %d bytes, title=%r, login_form=%s, loggedout_script=%s" % (
             d.get("path"), d.get("status"), d.get("bytes", 0), d.get("title"), d.get("login_form"), d.get("loggedout_script")))
+        if d.get("refused"):
+            out("  the gateway refused the login: %s" % d["refused"])
         if "verify_status" in d:
             out("  then GET %s: HTTP %s, %d bytes, title=%r, login_form=%s, loggedout_script=%s" % (
                 d.get("verify_path"), d.get("verify_status"), d.get("verify_bytes", 0), d.get("verify_title"),
@@ -1172,6 +1213,11 @@ def dump_cli(cfg: dict, out_dir: Optional[Path] = None, client: Optional[Xb7Clie
                     out("  saved -> %s" % (out_dir / fname))
                 except OSError:
                     pass
+    if not logged and getattr(cli, "refused", None):
+        out("docsis-dump: the gateway rejected the password (%s). Use the admin password of the gateway now at %s "
+            "(a new gateway's default is printed on its label), put it in docsis.password in config.json, and wait for "
+            "any lockout to end before trying again." % (cli.refused, cli.base))
+        return 1
     if not logged:
         out("docsis-dump: login rejected (user %s). Check that the same username/password work in a browser at %s "
             "(this is the gateway admin tool login, not your Xfinity account), and that the gateway is not in a "

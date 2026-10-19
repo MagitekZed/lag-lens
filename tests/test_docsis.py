@@ -34,11 +34,18 @@ class FakeResp(io.BytesIO):
         return self.status
 
 
+REFUSAL_PAGE = ('<html><head><script type="text/javascript" src="./cmn/js/lib/jquery-3.7.1.js"></script></head><body>'
+                '<input type="hidden" id="loc" value="en"><script type="text/javascript">'
+                'alert($.i18n("You have ")+"3"+$.i18n(" failed login attempts and your account will be locked for ")+"5"'
+                '+$.i18n(" minutes"));history.back();</script></body></html>')
+
+
 class FakeOpener:
     """Simulates the XB7: logged-out pages until a correct POST to /check.jst sets a session cookie."""
 
-    def __init__(self, pages=None, password=PASSWORD, login_path="/check.jst", fail=None):
+    def __init__(self, pages=None, password=PASSWORD, login_path="/check.jst", fail=None, refusal=None):
         self.pages = dict(pages or {})
+        self.refusal = refusal  # what a wrong password gets back (default: the login form again)
         self.password = password
         self.login_path = login_path
         self.session = False
@@ -61,7 +68,7 @@ class FakeOpener:
                 self.session = True
                 self.expire_after = None  # a fresh login issues a fresh session (one-shot expiry)
                 return FakeResp(self.pages.get("/at_a_glance.jst", "<html><body>At a glance</body></html>"))
-            return FakeResp(fx("login_page.html"))
+            return FakeResp(self.refusal if self.refusal is not None else fx("login_page.html"))
         if path == "/":
             return FakeResp(fx("login_page.html"))
         if not self.session:
@@ -298,6 +305,16 @@ class LoginTests(unittest.TestCase):
         self.assertFalse(c.login())
         self.assertFalse(c.logged_in)
 
+    def test_refusal_alert_is_a_rejection_and_stops_at_the_first_path(self):
+        # what an RDK-B gateway answers to a wrong password once it counts failures (seen on a real gateway)
+        op = FakeOpener(site_pages(), password="other", refusal=REFUSAL_PAGE)
+        c = d.Xb7Client(cfg()["docsis"], opener=op)
+        self.assertFalse(c.login())
+        self.assertFalse(c.logged_in)
+        self.assertEqual(c.refused, "You have 3 failed login attempts and your account will be locked for 5 minutes")
+        self.assertEqual([m for m, _, _ in op.calls], ["GET", "POST"])  # no second path: no extra failed attempt
+        self.assertIsNone(d.login_alert(fx("login_page.html")))
+
     def test_transport_error_scrubbed(self):
         op = FakeOpener(site_pages(), fail=OSError("connection refused while sending %s" % PASSWORD))
         c = d.Xb7Client(cfg()["docsis"], opener=op)
@@ -407,6 +424,20 @@ class CollectorTests(unittest.TestCase):
         self.assertFalse(dc.refresh())
         self.assertTrue(dc._due(clk.m + d.LOGIN_PAUSE_S + 1))
         self.assertEqual(dc._login_failures, 0)
+
+    def test_password_refusal_pauses_for_an_hour(self):
+        ctx, clk, op, dc = make(opener=FakeOpener(site_pages(), password="nope", refusal=REFUSAL_PAGE))
+        self.assertIsNone(dc.poll())
+        c = ctx.state.collector("docsis")
+        self.assertEqual(c["status"], "degraded")
+        self.assertIn("rejected the password (You have 3 failed login attempts", c["reason"])
+        self.assertIn("config.json", c["reason"])
+        posts = sum(1 for m, _, _ in op.calls if m == "POST")
+        self.assertEqual(posts, 1)
+        self.assertFalse(dc._due(clk.m + 1))
+        self.assertFalse(dc._due(clk.m + d.LOGIN_PAUSE_S + 1))  # longer than the generic 10 min pause
+        self.assertFalse(dc.refresh())  # a manual refresh does not try again either
+        self.assertTrue(dc._due(clk.m + d.LOGIN_REFUSED_PAUSE_S + 1))
 
     def test_session_expiry_relogin_and_404_drop(self):
         pages = site_pages()
