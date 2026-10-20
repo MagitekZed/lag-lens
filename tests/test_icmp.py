@@ -249,6 +249,48 @@ class ErrQueueTests(unittest.TestCase):
         self.assertEqual(tuple(icmp.parse_errqueue(anc, 4)), (11, 0, None))
 
 
+class RxTimestampTests(unittest.TestCase):
+    class Sock:
+        def __init__(self, fail=None):
+            self.opts = []
+            self.fail = fail
+
+        def setsockopt(self, level, opt, value):
+            if self.fail:
+                raise self.fail
+            self.opts.append((level, opt, value))
+
+        def recvmsg(self, n, anc):
+            raise BlockingIOError()
+
+    def test_round_trip(self):
+        for plat in ("darwin", "linux", "freebsd13"):
+            anc = icmp.timestamp_cmsg(1792489334123456, plat)
+            self.assertEqual(icmp.rx_timestamp_us(anc, plat), 1792489334123456, plat)
+
+    def test_other_cmsgs_and_bad_values_are_ignored(self):
+        anc = icmp.timestamp_cmsg(1792489334123456, "darwin")
+        lvl, typ, data = anc[0]
+        self.assertIsNone(icmp.rx_timestamp_us([(lvl, typ + 1, data)], "darwin"))
+        self.assertIsNone(icmp.rx_timestamp_us([(lvl, typ, data[:8])], "darwin"))
+        self.assertIsNone(icmp.rx_timestamp_us([(lvl, typ, struct.pack("@qi", 1792489334, 1_000_000) + bytes(4))], "darwin"))
+        self.assertIsNone(icmp.rx_timestamp_us([], "darwin"))
+        self.assertIsNone(icmp.rx_timestamp_us(anc, "win32"))
+        # a Linux timeval read on Linux, the darwin one is too short there
+        self.assertIsNone(icmp.rx_timestamp_us([(socket.SOL_SOCKET, 29, data[:12])], "linux"))
+
+    def test_enable(self):
+        s = self.Sock()
+        self.assertTrue(icmp.enable_rx_timestamps(s, "darwin"))
+        self.assertEqual(s.opts, [(socket.SOL_SOCKET, 0x0400, 1)])
+        s = self.Sock()
+        self.assertTrue(icmp.enable_rx_timestamps(s, "linux"))
+        self.assertEqual(s.opts, [(socket.SOL_SOCKET, 29, 1)])
+        self.assertFalse(icmp.enable_rx_timestamps(self.Sock(fail=OSError(42, "no")), "darwin"))
+        self.assertFalse(icmp.enable_rx_timestamps(self.Sock(), "win32"))
+        self.assertFalse(icmp.enable_rx_timestamps(object(), "darwin"))
+
+
 class SocketHelperTests(unittest.TestCase):
     def test_sockaddr_for(self):
         self.assertEqual(icmp.sockaddr_for("10.0.0.1", 4), ("10.0.0.1", 0))

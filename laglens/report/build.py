@@ -5,7 +5,8 @@ Two entry points:
 * :class:`ReportBuilder` — the live component (``Cls(ctx)`` with ``start``/
   ``stop``/``build``). Its thread rebuilds ``report.html`` every
   :data:`REPORT_INTERVAL_S` while the store is writing, on ``episode_close``
-  (debounced :data:`EPISODE_DEBOUNCE_S`) and :meth:`ReportBuilder.build`
+  (debounced :data:`EPISODE_DEBOUNCE_S`, at most once per
+  :data:`EPISODE_MIN_GAP_S`) and :meth:`ReportBuilder.build`
   ``(final=True)`` is called by ``app.shutdown`` after the writer drained.
 * :func:`rebuild` — the offline reconstruction used by ``--report DIR`` and by
   ``GET /sessions/<id>/report.html`` when the file is missing: a fresh
@@ -55,8 +56,11 @@ from laglens.version import __version__
 
 log = logging.getLogger("laglens.report")
 
-REPORT_INTERVAL_S = 30.0
+#: A late-session build holds the GIL for over a second (1.7 s at 10 h), which delays the probe
+#: threads; ``GET /report.html`` still rebuilds on demand when the file is older than 30 s.
+REPORT_INTERVAL_S = 300.0
 EPISODE_DEBOUNCE_S = 10.0
+EPISODE_MIN_GAP_S = 120.0
 #: SPEC_FULL §9.1: size target < 8 MB at 12 h.
 SIZE_LIMIT_BYTES = 8 * 1024 * 1024
 #: Sessions longer than this get the series folded to every THIN_FACTOR-th window.
@@ -1141,7 +1145,7 @@ class ReportBuilder:
     """
 
     def __init__(self, ctx: Any, interval_s: float = REPORT_INTERVAL_S, debounce_s: float = EPISODE_DEBOUNCE_S,
-                 poll_s: float = 0.5) -> None:
+                 poll_s: float = 0.5, min_gap_s: float = EPISODE_MIN_GAP_S) -> None:
         self.ctx = ctx
         self.state: State = ctx.state
         self.store: Store = ctx.store
@@ -1150,6 +1154,7 @@ class ReportBuilder:
         self.interval_s = float(interval_s)
         self.debounce_s = float(debounce_s)
         self.poll_s = float(poll_s)
+        self.min_gap_s = float(min_gap_s)
         self.thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
         self._unsub: Optional[Callable[[], None]] = None
@@ -1195,7 +1200,7 @@ class ReportBuilder:
             now = time.monotonic()
             due = now - self._last_build >= self.interval_s
             pend = self._pending_close
-            if pend is not None and now - pend >= self.debounce_s:
+            if pend is not None and now - pend >= self.debounce_s and now - self._last_build >= self.min_gap_s:
                 due = True
             if not due:
                 continue
@@ -1852,7 +1857,7 @@ __all__ = [
     "build_series_local", "thin_series", "hour_heatmap", "activity_stats", "scrub", "escape_json_for_html",
     "slice_windows", "collect_slices", "iter_sample_rows", "replay_samples", "docsis_from_rows", "igd_from_rows",
     "path_from_rows", "write_atomic_file", "salvage_session_json", "truncate_v6_prefix", "METHODOLOGY",
-    "REPORT_INTERVAL_S", "EPISODE_DEBOUNCE_S",
+    "REPORT_INTERVAL_S", "EPISODE_DEBOUNCE_S", "EPISODE_MIN_GAP_S",
     "SIZE_LIMIT_BYTES", "THIN_AFTER_S", "THIN_FACTOR", "RAW_MAX_SLICES", "REFERENCE_KEYS", "REPORT_FILE",
     "COMCAST_FILE", "DATA_SCRIPT_ID",
 ]

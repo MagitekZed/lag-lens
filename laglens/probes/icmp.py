@@ -17,6 +17,9 @@ be unit-tested from synthetic bytes:
 * :func:`enable_recverr` / :func:`parse_errqueue` — the Linux
   ``IP_RECVERR``/``IPV6_RECVERR`` error-queue helpers (``sock_extended_err``
   followed by the offender ``sockaddr``);
+* :func:`enable_rx_timestamps` / :func:`rx_timestamp_us` — ``SO_TIMESTAMP``:
+  the kernel stamps each reply when it arrives, so an RTT stays right while
+  this process waits for the GIL (a report build, a GC pass) before reading it;
 * :func:`sockaddr_for` — IPv6 link-local addresses (``fe80::1%en0``) become
   ``(addr, 0, 0, scope_id)`` through ``socket.if_nametoindex``.
 
@@ -84,6 +87,12 @@ SO_EE_ORIGIN_ICMP6 = 3
 EXT_ERR_STRUCT = struct.Struct("=IBBBBII")  # ee_errno, ee_origin, ee_type, ee_code, ee_pad, ee_info, ee_data
 SOCKADDR_IN = struct.Struct("=HH4s")  # sin_family, sin_port, sin_addr (then 8 B zero)
 SOCKADDR_IN6 = struct.Struct("=HHI16sI")  # sin6_family, port, flowinfo, addr, scope_id
+
+#: ``SO_TIMESTAMP`` / ``SCM_TIMESTAMP`` (CPython does not export them): BSD/macOS vs Linux.
+SO_TIMESTAMP_BSD, SCM_TIMESTAMP_BSD = 0x0400, 0x02
+SO_TIMESTAMP_LINUX = SCM_TIMESTAMP_LINUX = 29
+#: Ancillary buffer for one ``struct timeval``.
+RX_ANC_SPACE = socket.CMSG_SPACE(16) if hasattr(socket, "CMSG_SPACE") else 0
 
 #: Whether this OS delivers IPv4 replies with the IP header (BSD) or not (Linux).
 REPLIES_HAVE_IP_HEADER: bool = not sys.platform.startswith("linux")
@@ -373,6 +382,57 @@ def enable_recverr(sock: Any, family: int) -> None:
         sock.setsockopt(SOL_IP, IP_RECVERR, 1)
 
 
+def _timestamp_opts(platform_name: str) -> Optional[Tuple[int, int]]:
+    if platform_name.startswith("linux"):
+        return SO_TIMESTAMP_LINUX, SCM_TIMESTAMP_LINUX
+    if platform_name == "darwin" or "bsd" in platform_name:
+        return SO_TIMESTAMP_BSD, SCM_TIMESTAMP_BSD
+    return None
+
+
+def enable_rx_timestamps(sock: Any, platform_name: str = sys.platform) -> bool:
+    """Turn on ``SO_TIMESTAMP``; ``False`` when the OS, the socket or ``recvmsg`` cannot do it."""
+    opts = _timestamp_opts(platform_name)
+    if opts is None or not RX_ANC_SPACE or not hasattr(sock, "recvmsg"):
+        return False
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, opts[0], 1)
+    except (OSError, AttributeError):
+        return False
+    return True
+
+
+def rx_timestamp_us(ancdata: Iterable[Tuple[int, int, bytes]], platform_name: str = sys.platform) -> Optional[int]:
+    """Wall-clock µs of the ``SCM_TIMESTAMP`` in ``recvmsg`` ancillary data, or ``None``.
+
+    ``struct timeval`` is ``{int64 tv_sec; int32 tv_usec}`` on 64-bit macOS and
+    ``{long; long}`` on 64-bit Linux.
+    """
+    opts = _timestamp_opts(platform_name)
+    if opts is None:
+        return None
+    for level, ctype, data in ancdata:
+        if level != socket.SOL_SOCKET or ctype != opts[1] or len(data) < 12:
+            continue
+        if platform_name.startswith("linux"):
+            if len(data) < 16:
+                continue
+            sec, usec = struct.unpack("@qq", data[:16])
+        else:
+            sec, usec = struct.unpack("@qi", data[:12])
+        if sec > 0 and 0 <= usec < 1_000_000:
+            return sec * 1_000_000 + usec
+    return None
+
+
+def timestamp_cmsg(wall_us: int, platform_name: str = sys.platform) -> List[Tuple[int, int, bytes]]:
+    """Synthetic ``SCM_TIMESTAMP`` ancillary data (tests)."""
+    sec, usec = divmod(int(wall_us), 1_000_000)
+    if platform_name.startswith("linux"):
+        return [(socket.SOL_SOCKET, SCM_TIMESTAMP_LINUX, struct.pack("@qq", sec, usec))]
+    return [(socket.SOL_SOCKET, SCM_TIMESTAMP_BSD, struct.pack("@qi", sec, usec) + b"\x00" * 4)]
+
+
 class ErrQueue(NamedTuple):
     """``(ee_type, ee_code, offender_addr)`` from one ``MSG_ERRQUEUE`` read."""
 
@@ -509,6 +569,7 @@ __all__ = [
     "SOL_IP", "IP_RECVERR", "SOL_IPV6", "IPV6_RECVERR", "SO_EE_ORIGIN_ICMP", "SO_EE_ORIGIN_ICMP6",
     "checksum", "build_payload", "build_echo", "Payload", "parse_payload", "InnerHeader", "Reply", "parse_reply",
     "open_icmp_socket", "is_fallback_error", "sockaddr_for", "set_ttl", "enable_recverr", "ErrQueue",
+    "RX_ANC_SPACE", "enable_rx_timestamps", "rx_timestamp_us", "timestamp_cmsg",
     "parse_sock_extended_err", "parse_errqueue", "errqueue_is_time_exceeded", "errqueue_is_unreachable",
     "ipv4_header", "ipv6_header", "echo_reply_for", "time_exceeded_for", "errqueue_cmsg",
 ]

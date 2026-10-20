@@ -3,6 +3,24 @@
 All notable changes to Lag Lens are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and versions follow SemVer.
 
+## [1.0.22] - 2026-10-20
+
+### Fixed
+- Busy moments inside Lag Lens itself were recorded as network delay. A probe reply was timed when the
+  engine thread read it, and while another thread held Python's GIL (most often the report rebuild, which
+  grew to 1.7 s per build over a 10 h session) the reply waited unread: about 85% of the gateway RTT spikes
+  over 20 ms in an overnight session fell inside a report build, and many "unclear" episodes came from them.
+  Now:
+  - ICMP replies are timed by the kernel's arrival stamp (`SO_TIMESTAMP`, macOS and Linux), and the send is
+    stamped right before the `sendto`. A stamp that does not fit inside the read-time RTT (a wall-clock step)
+    is ignored. The engine's collector entry says `rx_timestamps: kernel` (or `app` where the OS has none).
+  - The monitor hands the GIL over after 1 ms instead of Python's 5 ms, which also shortens the waits of the
+    TCP, DNS, NTP and Plex probes (measured: the median gateway RTT read beside a CPU-bound thread went from
+    131 ms to 1.4 ms).
+  - `report.html` is rebuilt every 5 minutes instead of every 30 s, and a closed episode triggers a rebuild
+    at most every 2 minutes. Opening the report from the dashboard still rebuilds it when it is over 30 s old.
+- The status pill listed Plex mode as "Degraded: plex (off …)" while Plex mode was simply off.
+
 ## [1.0.21] - 2026-10-18
 
 ### Changed

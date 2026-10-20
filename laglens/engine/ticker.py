@@ -59,7 +59,7 @@ GAP_LATE_S = 2.0
 GAP_SHOW_S = 30.0
 #: Collector ``disabled`` reasons that are configuration choices, not degradation.
 CHOICE_REASONS = ("not configured", "password not set", "disabled by", "disabled in config", "enabled is false",
-                  "wired interface", "no ipv6", "not supported")
+                  "wired interface", "no ipv6", "not supported", "start with --")
 TROUBLE_PHRASES = {
     "docsis_access": "packets lost past your gateway (cable line)",
     "comcast_network": "packets lost in Comcast's network",

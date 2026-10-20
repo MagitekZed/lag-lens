@@ -23,6 +23,7 @@ from laglens.probes.icmp import (  # noqa: E402
     ipv4_header,
     parse_payload,
     time_exceeded_for,
+    timestamp_cmsg,
 )
 from laglens.state import (  # noqa: E402
     F_ERROR,
@@ -882,6 +883,64 @@ class LifecycleTests(unittest.TestCase):
         h.state.stop_event.set()
         h.engine._thread.join(2.0)
         self.assertFalse(h.engine._thread.is_alive())
+        h.close()
+
+
+class StampedSock(FakeSock):
+    """A socket with ``SO_TIMESTAMP``: the kernel stamped each reply ``read_lag`` s before it was read."""
+
+    def __init__(self, fam, clock, platform_name="darwin"):
+        super().__init__(fam, clock)
+        self.platform_name = platform_name
+        self.opts = []
+        self.read_lag = 0.0
+
+    def setsockopt(self, level, opt, value):
+        self.opts.append((level, opt, value))
+
+    def recvmsg(self, n, anc):
+        buf, src = self.recvfrom(n)
+        return buf, timestamp_cmsg(int(round((self.clock.w - self.read_lag) * 1e6)), self.platform_name), 0, src
+
+
+class RxTimestampTests(unittest.TestCase):
+    def harness(self):
+        def factory(fam):
+            h.socks[fam] = StampedSock(fam, h.clock)
+            return h.socks[fam]
+
+        h = Harness([tgt(3, "inet4_cf", "1.1.1.1")], platform_name="darwin", has_ip_header=True, socket_factory=factory)
+        h.setup()
+        h.socks[4].responder = echo_responder({"1.1.1.1": 0.015}, with_ip_header=True)
+        return h
+
+    def test_a_reply_read_late_keeps_its_real_rtt(self):
+        h = self.harness()
+        h.socks[4].read_lag = 0.010  # the reply sat 10 ms in the socket while another thread held the GIL
+        h.drive(1.0)
+        self.assertEqual([s.value for s in h.samples("inet4_cf")], [5000] * 4)
+        self.assertEqual(h.engine.stats()["rx_timestamps"], {"4": "kernel", "6": "kernel"})
+        self.assertEqual(h.state.collector("engine")["rx_timestamps"], "kernel")
+        h.close()
+
+    def test_a_stamp_outside_the_userland_rtt_is_not_trusted(self):
+        h = self.harness()
+        h.socks[4].read_lag = -0.5  # wall clock stepped forward between send and reply
+        h.drive(1.0)
+        self.assertEqual([s.value for s in h.samples("inet4_cf")], [15000] * 4)
+        h.close()
+        h = self.harness()
+        h.socks[4].read_lag = 0.020  # stamped before the send: wall clock stepped back
+        h.drive(1.0)
+        self.assertEqual([s.value for s in h.samples("inet4_cf")], [15000] * 4)
+        h.close()
+
+    def test_sockets_without_timestamps_use_the_read_time(self):
+        h = Harness([tgt(3, "inet4_cf", "1.1.1.1")]).setup()
+        h.socks[4].responder = echo_responder({"1.1.1.1": 0.015})
+        h.drive(1.0)
+        self.assertEqual([s.value for s in h.samples("inet4_cf")], [15000] * 4)
+        self.assertEqual(h.engine.stats()["rx_timestamps"], {"4": "app", "6": "app"})
         h.close()
 
 

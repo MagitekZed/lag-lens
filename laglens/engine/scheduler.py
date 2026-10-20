@@ -61,10 +61,13 @@ from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
 from laglens.platform import is_private
 from laglens.probes.icmp import (
     REPLIES_HAVE_IP_HEADER,
+    RX_ANC_SPACE,
     build_echo,
+    enable_rx_timestamps,
     is_fallback_error,
     open_icmp_socket,
     parse_reply,
+    rx_timestamp_us,
     sockaddr_for,
 )
 from laglens.probes.pingbin import PingBackend, find_ping_binary
@@ -103,6 +106,9 @@ MIN_TIMEOUT_S = 0.001
 MAX_TIMEOUT_S = 0.25
 SEND_SLACK_S = 0.0005
 MAX_RECV_PER_WAKE = 64
+#: A kernel-stamped RTT may exceed the userland one by this much (wall vs monotonic clock noise)
+#: before it is distrusted (a wall-clock step between send and reply).
+RX_TS_SLACK_US = 1000
 RATE_CAP_HZ = 5.0
 REANCHOR_MS = 10.0
 STALL_KEEP_S = 120
@@ -150,14 +156,16 @@ class _Sched:
 class _Pending:
     """One in-flight (or recently lost) probe."""
 
-    __slots__ = ("tid", "key", "seq", "t_send", "t_send_ns", "ts_ms", "flags", "lost", "done")
+    __slots__ = ("tid", "key", "seq", "t_send", "t_send_ns", "t_send_wall_us", "ts_ms", "flags", "lost", "done")
 
-    def __init__(self, tid: int, key: str, seq: int, t_send: float, t_send_ns: int, ts_ms: int, flags: int) -> None:
+    def __init__(self, tid: int, key: str, seq: int, t_send: float, t_send_ns: int, ts_ms: int, flags: int,
+                 t_send_wall_us: int = 0) -> None:
         self.tid = tid
         self.key = key
         self.seq = seq
         self.t_send = t_send
         self.t_send_ns = t_send_ns
+        self.t_send_wall_us = t_send_wall_us
         self.ts_ms = ts_ms
         self.flags = flags
         self.lost = False
@@ -227,6 +235,8 @@ class Engine:
             self.late_window_s = self.timeout_s
 
         self.sockets: Dict[int, Any] = {}
+        #: Families whose socket has ``SO_TIMESTAMP`` on (RTTs from the kernel's arrival time).
+        self.rx_ts: Dict[int, bool] = {}
         self.backend: Dict[int, Optional[str]] = {4: None, 6: None}
         self.backend_reason: Dict[int, Optional[str]] = {4: None, 6: None}
         self.pingbins: Dict[int, Any] = {}
@@ -291,6 +301,7 @@ class Engine:
             except Exception:  # noqa: BLE001
                 pass
         self.sockets.clear()
+        self.rx_ts.clear()
         self._close_pipe()
 
     def wake(self) -> None:
@@ -317,6 +328,7 @@ class Engine:
         d["pending"] = len(self._pending)
         d["targets"] = len(self._sched)
         d["backend"] = {"4": self.backend.get(4), "6": self.backend.get(6)}
+        d["rx_timestamps"] = {str(f): ("kernel" if on else "app") for f, on in sorted(self.rx_ts.items())}
         d["local_network"] = "denied" if self._lan_blocked else "ok"
         d["uptime_s"] = round(self._clock() - self._started_at, 1) if self._started_at is not None else 0.0
         d["pingbin"] = {str(f): pb.stats() for f, pb in self.pingbins.items()} if self.pingbins else {}
@@ -333,6 +345,7 @@ class Engine:
                 continue
             try:
                 self.sockets[fam] = self._socket_factory(fam)
+                self.rx_ts[fam] = enable_rx_timestamps(self.sockets[fam], self.platform_name)
                 self.backend[fam] = "socket"
                 self.backend_reason[fam] = None
                 continue
@@ -536,11 +549,14 @@ class Engine:
             if lateness_ms > LATE_STALL_MS:
                 self._cur.stall = True
                 self._stall_seconds[ts_ms // 1000] = True
-        t_send_ns = int(now * 1e9)
-        pkt = build_echo(sch.family, seq, sch.tid, t_send_ns)
+        pkt = build_echo(sch.family, seq, sch.tid, int(now * 1e9))
         flags = F_LOADTEST if self.state.loadtest.get("running") else 0
         if sch.first_send is None:
             sch.first_send = now  # first attempt, successful or not (gw6 no_responder counts from here)
+        # Stamped right before the syscall: ``now`` can be stale by a GIL wait (the lock above, a
+        # report build in another thread), which would otherwise be counted as network delay.
+        t_send_ns = int(self._clock() * 1e9)
+        t_send_wall_us = int(self._wall() * 1e6)
         try:
             sock.sendto(pkt, sch.sockaddr)
         except OSError as exc:
@@ -550,7 +566,7 @@ class Engine:
         self.totals["sent"] += 1
         self._cur.sent += 1
         sch.sent += 1
-        entry = _Pending(sch.tid, sch.key, seq, now, t_send_ns, ts_ms, flags)
+        entry = _Pending(sch.tid, sch.key, seq, now, t_send_ns, ts_ms, flags, t_send_wall_us)
         self._pending[(sch.tid, seq)] = entry
         self._awaiting.append(entry)
         self._advance(sch, now)
@@ -576,9 +592,15 @@ class Engine:
 
     # ------------------------------------------------------------- receive
     def _recv(self, fam: int, sock: Any) -> None:
+        stamped = self.rx_ts.get(fam, False)
         for _ in range(MAX_RECV_PER_WAKE):
+            rx_us = None
             try:
-                buf, addr = sock.recvfrom(2048)
+                if stamped:
+                    buf, anc, _flags, addr = sock.recvmsg(2048, RX_ANC_SPACE)
+                    rx_us = rx_timestamp_us(anc, self.platform_name)
+                else:
+                    buf, addr = sock.recvfrom(2048)
             except (BlockingIOError, InterruptedError):
                 return
             except OSError as exc:
@@ -586,12 +608,13 @@ class Engine:
                 log.debug("engine: recvfrom v%d: %s", fam, exc)
                 return
             try:
-                self._handle_datagram(fam, buf, addr)
+                self._handle_datagram(fam, buf, addr, rx_us)
             except Exception:  # noqa: BLE001 - one odd packet must not stop the engine
                 self.totals["foreign"] += 1
                 log.exception("engine: bad datagram from %r", addr)
 
-    def _handle_datagram(self, fam: int, buf: bytes, addr: Any) -> None:
+    def _handle_datagram(self, fam: int, buf: bytes, addr: Any, rx_us: Optional[int] = None) -> None:
+        """Match one reply; ``rx_us`` is the kernel's arrival time (``SO_TIMESTAMP``, wall µs) when known."""
         now = self._clock()
         now_ns = int(now * 1e9)
         reply = parse_reply(fam, buf, self._has_ip_header)
@@ -612,6 +635,12 @@ class Engine:
             self.totals["stray"] += 1
             return
         rtt_us = max(0, (now_ns - entry.t_send_ns) // 1000)
+        if rx_us is not None and entry.t_send_wall_us:
+            # The kernel's arrival stamp leaves out any wait for the GIL before this read; trust it only
+            # when it fits inside the userland RTT (a wall-clock step between send and reply would not).
+            k_us = rx_us - entry.t_send_wall_us
+            if 0 <= k_us <= rtt_us + RX_TS_SLACK_US:
+                rtt_us = min(k_us, rtt_us)
         entry.done = True
         del self._pending[key]
         sch = self._sched.get(entry.tid)
@@ -760,6 +789,7 @@ class Engine:
         try:
             self.state.set_collector(
                 "engine", status, reason=reason, backend4=self.backend.get(4), backend6=self.backend.get(6),
+                rx_timestamps="kernel" if self.rx_ts and all(self.rx_ts.values()) else "app",
                 local_network="denied" if self._lan_blocked else "ok", targets=len(self._sched),
             )
         except Exception:  # noqa: BLE001

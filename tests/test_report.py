@@ -213,7 +213,7 @@ class BuilderBehaviourTests(unittest.TestCase):
         self.assertEqual(self.fx.state.collector("report")["status"], "ok")
 
     def test_thread_builds_on_episode_close_and_periodically(self):
-        b = B.ReportBuilder(self.fx.ctx, interval_s=60.0, debounce_s=0.2, poll_s=0.05)
+        b = B.ReportBuilder(self.fx.ctx, interval_s=60.0, debounce_s=0.2, poll_s=0.05, min_gap_s=0.0)
         b.start()
         try:
             self.fx.state.publish("episode_close", {"id": "ep-000001"})
@@ -226,6 +226,17 @@ class BuilderBehaviourTests(unittest.TestCase):
             self.fx.state.stop_event.set()
             b.stop(2.0)
         self.assertFalse(b.thread.is_alive())
+        # an episode right after a build waits for the minimum gap
+        b3 = B.ReportBuilder(self.fx.ctx, interval_s=60.0, debounce_s=0.05, poll_s=0.05, min_gap_s=60.0)
+        self.fx.state.stop_event.clear()
+        b3.start()
+        try:
+            self.fx.state.publish("episode_close", {"id": "ep-000002"})
+            time.sleep(0.4)
+            self.assertEqual(b3.builds, 0)
+        finally:
+            self.fx.state.stop_event.set()
+            b3.stop(2.0)
         b2 = B.ReportBuilder(self.fx.ctx, interval_s=0.3, debounce_s=10.0, poll_s=0.05)
         self.fx.state.stop_event.clear()
         b2.start()

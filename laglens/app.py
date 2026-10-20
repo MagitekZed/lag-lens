@@ -58,6 +58,7 @@ EXIT_NOT_IMPLEMENTED = 2
 EXIT_ALREADY_RUNNING = 3  # start.sh does not restart on this code
 SESSION_JSON_INTERVAL_S = 30.0
 STOP_GRACE_S = 4.0
+GIL_SWITCH_S = 0.001
 #: ``stop_reason`` of a session that reached ``cfg.rotate_hours``: ``cmd_run`` starts a fresh one.
 STOP_REASON_ROTATE = "rotate"
 #: Filled by :func:`run` when it returns (``stop_reason``, ``session_dir``); read by :func:`cmd_run`.
@@ -344,6 +345,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     sessions so a choice made on ``/setup`` (Xbox IP) is picked up.
     """
     setup_logging(None, args.verbose)
+    # How long a probe thread waits for the GIL while another thread computes (Python's default is
+    # 5 ms per hand-off; measured median gateway RTT beside a CPU-bound thread: 131 ms at 5 ms, 1.4 ms at 1 ms).
+    sys.setswitchinterval(GIL_SWITCH_S)
     other = running_instance(ROOT / SESSIONS_DIRNAME)
     if other is not None:
         where = (" (session %s, dashboard port %s)" % (other["session"], other["port"])) if other.get("session") else ""
