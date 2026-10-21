@@ -257,6 +257,8 @@ class Ticker:
         degraded = self.degraded_collectors()
         if st.loadtest.get("running"):
             status, pill = STATUS_LOADTEST, "Load test running"
+        elif self.detector.link_down():
+            status, pill = STATUS_GAP, "This computer's network link is down: not measuring"
         elif now < self._gap_until:
             status, pill = STATUS_GAP, "Monitor paused/resumed"
         elif open_ep is not None:

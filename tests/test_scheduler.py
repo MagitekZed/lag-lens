@@ -832,6 +832,22 @@ class LocalNetworkTests(unittest.TestCase):
         self.assertEqual(h.state.collector("engine")["status"], "ok")
         h.close()
 
+    def test_a_dropped_link_is_not_a_permission_block(self):
+        # the cable comes out: the gateway is refused first and the internet stops answering at the same
+        # moment, so its last reply predates the refusals (seen 2026-10-21: a false Local Network warning)
+        h, blocked = self._harness()
+        blocked["on"] = False
+        h.socks[4].responder = echo_responder({"1.1.1.1": 0.020, "10.0.0.1": 0.002})
+        h.drive(5.0)
+        down = OSError(errno.EHOSTUNREACH, "No route to host")
+        h.socks[4].fail = h.socks[6].fail = lambda addr: down
+        h.drive(10.0)
+        self.assertTrue(h.state.target("gw4").enabled)
+        self.assertEqual(h.engine.stats()["local_network"], "ok")
+        self.assertEqual([n for n in h.state.drain_notes() if n["type"] == "probe_error"
+                          and n["peak"].get("reason") == "local_network_permission"], [])
+        h.close()
+
     def test_linux_ehostunreach_is_a_plain_error(self):
         h, blocked = self._harness(platform_name="linux")
         h.drive(3.0)

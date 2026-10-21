@@ -491,6 +491,12 @@ def persistent_findings(ctx: Any, episodes: List[Episode], now: float) -> List[s
         if (isinstance(speed, (int, float)) and speed < 1000) or (duplex and str(duplex).lower().startswith("half")):
             line += " (slow or half duplex: worth fixing)"
         out.append(line.strip() + ".")
+    with state.lock:
+        downs = [e for e in state.events if e.type == "link_down"]
+    if downs:
+        secs = sum(max(0.0, (e.t1 if e.t1 is not None else now) - e.t0) for e in downs)
+        out.append("This computer's own network link was down %d time%s (%s in all); nothing was measured then and "
+                   "no episode was counted." % (len(downs), "" if len(downs) == 1 else "s", fmt_duration(secs)))
     xbox_link = state.xbox.get("link_mbps")
     if xbox_link:
         out.append("Xbox link: %s Mb/s%s." % (xbox_link, " (expected 1000)" if xbox_link < 1000 else ""))

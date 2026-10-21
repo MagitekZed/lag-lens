@@ -267,6 +267,8 @@ class Engine:
         }
 
         self._inet_last_reply: Optional[float] = None
+        #: Start of the current run of refused sends to the gateway (cleared by a send that goes out).
+        self._gw_fail_since: Optional[float] = None
         self._lan_blocked: Dict[str, Target] = {}
         self._lan_warned_at: Optional[float] = None
         self._next_lan_retry: float = 0.0
@@ -564,6 +566,8 @@ class Engine:
             self._advance(sch, now)
             return
         self.totals["sent"] += 1
+        if sch.target.role == "gateway":
+            self._gw_fail_since = None
         self._cur.sent += 1
         sch.sent += 1
         entry = _Pending(sch.tid, sch.key, seq, now, t_send_ns, ts_ms, flags, t_send_wall_us)
@@ -581,6 +585,8 @@ class Engine:
         # that does not answer ARP (a sleeping Xbox or player), and that device is merely unreachable.
         if (code == errno.EHOSTUNREACH and sch.lan and self.platform_name == "darwin"
                 and sch.target.role == "gateway"):
+            if self._gw_fail_since is None:
+                self._gw_fail_since = now
             lan_detected = self._lan_detect(sch, now)
         if lan_detected:
             return  # macOS refused the send: not a sample of the device (the target is paused until allowed)
@@ -883,8 +889,14 @@ class Engine:
 
     # ------------------------------------------------ macOS Local Network
     def _lan_detect(self, sch: _Sched, now: float) -> bool:
-        """EHOSTUNREACH to a LAN target while the internet answers → Local Network permission denied."""
+        """EHOSTUNREACH to a LAN target while the internet answers → Local Network permission denied.
+
+        The internet must answer *after* the gateway sends started failing: when this computer's own link
+        drops, the gateway is refused first and the internet's last reply is from before that.
+        """
         if self._inet_last_reply is None or now - self._inet_last_reply > INET_EVIDENCE_S:
+            return False
+        if self._gw_fail_since is not None and self._inet_last_reply <= self._gw_fail_since:
             return False
         first = not self._lan_blocked
         try:

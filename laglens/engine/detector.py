@@ -20,7 +20,8 @@ Per tick:
    ``tcp_slow/tcp_timeout``, ``cdn_slow``; hop symptoms start informational
    (severity 1) and are upgraded when a deeper target shows a symptom in the
    same or the next 250 ms slot;
-4. ``host_stall`` from ``F_STALL`` samples or the host collector's latest row;
+4. ``host_stall`` from ``F_STALL`` samples or the host collector's latest row, and ``link_down``
+   while this computer's own link has no carrier (no episode opens inside that span);
 5. the ``xb7_reset`` composite rule;
 6. close events whose end rule fired (an updated row goes to ``events.jsonl``);
 7. episodes (§7.4): open on a severity ≥ 2 symptom on a non-hop target (or a
@@ -94,6 +95,10 @@ EVENT_ATTACH_S = 5.0
 DOCSIS_ATTACH_S = 60.0
 MARK_LINK_S = 60.0
 EVENT_MAX_OPEN_S = 600.0
+#: The host collector reads the link every 10 s, so the carrier went down up to this long before it was seen.
+LINK_LEAD_S = 10.0
+#: After the link is back, DHCP, ARP and IPv6 router adverts take a while: the span lasts this much longer.
+LINK_SETTLE_S = 30.0
 PROBE_ERROR_RATE_S = 60.0
 POINT_RATE_S = 30.0
 CDN_RATE_S = 120.0
@@ -247,6 +252,7 @@ class Detector:
         self._corr_times: List[Tuple[str, float]] = []
         self._dark: Dict[str, Optional[float]] = {"inet": None, "gw": None}
         self._reset_cands: List[dict] = []
+        self._link_spans: List[List[Optional[float]]] = []  # [t0, t1 or None] of each link_down
         self.blips = 0
         self.verdict_due = False
         self.edge: Optional[float] = None
@@ -263,6 +269,7 @@ class Detector:
             ("baselines", lambda: self._update_baselines(edge)),
             ("symptoms", lambda: self._eval_targets(edge, loadtest)),
             ("host_stall", lambda: self._eval_host_stall(edge)),
+            ("link", lambda: self._eval_link(edge)),
             ("hops", lambda: self._corroborate_hops(edge)),
             ("xb7_reset", lambda: self._xb7_reset(edge)),
             ("close", lambda: self._close_events(edge)),
@@ -285,6 +292,10 @@ class Detector:
         if tr is not None and not tr.closed:
             self._refresh_last_symptom(tr)
             self._close_track(tr, t)
+
+    def link_down(self) -> bool:
+        """Whether this computer's own link is down (or has not settled since it came back)."""
+        return (-1, "link_down") in self._open
 
     def open_episode(self) -> Optional[Episode]:
         """The registered open episode, if any."""
@@ -828,6 +839,39 @@ class Detector:
         elif ev is not None and now - self._last_t.get(ev.id, ev.t0) >= 2.0:
             self._close_event(key, self._last_t.get(ev.id, ev.t0))
 
+    # ----------------------------------------------------------- link down
+    def _eval_link(self, edge: float) -> None:
+        """``link_down`` spans the time this computer's own link has no carrier, plus a settle period.
+
+        Every send then fails on this computer (EHOSTUNREACH, ENETUNREACH), which says nothing about the
+        router or Comcast: :meth:`_episodes` opens no episode inside the span.
+        """
+        row = self.state.latest("iface") or {}
+        carrier = row.get("carrier")
+        now = self.state.now()
+        key = (-1, "link_down")
+        ev = self._open.get(key)
+        if carrier is False:
+            if ev is None:
+                t0 = now - LINK_LEAD_S
+                iface = (self.state.host or {}).get("iface")
+                ev = self._open_event("link_down", None, t0, 3, {"iface": iface}, False, stall=True,
+                                      note="this computer's network link is down%s" % (" (%s)" % iface if iface else ""))
+                self._attach_event(ev)
+                self._link_spans.append([t0, None])
+                log.info("detector: %s; no episodes until it is back", ev.note)
+            ev.peak.pop("up_t", None)
+            self._last_t[ev.id] = now
+        elif ev is not None and carrier is True:
+            up = float(ev.peak.setdefault("up_t", round(now, 3)))
+            if now - up >= LINK_SETTLE_S:
+                self._close_event(key, up + LINK_SETTLE_S)
+                if self._link_spans:
+                    self._link_spans[-1][1] = up + LINK_SETTLE_S
+
+    def _in_link_down(self, t: float) -> bool:
+        return any(t0 is not None and t0 <= t and (t1 is None or t <= t1) for t0, t1 in self._link_spans[-20:])
+
     # ------------------------------------------------------- hop evidence
     def _deeper_roles(self, role: str) -> Tuple[str, ...]:
         return ("mid_hop", "anycast") if role == "isp_hop" else ("anycast",)
@@ -949,6 +993,8 @@ class Detector:
         for key in list(self._open):
             ev = self._open[key]
             tid, typ = key
+            if typ == "link_down":
+                continue  # closed by _eval_link once the link has settled
             last = self._last_t.get(ev.id, ev.t0)
             target = self.state.target_by_id(tid) if tid >= 0 else None
             interval = self._interval(target) if target is not None else 0.25
@@ -994,7 +1040,8 @@ class Detector:
 
     def _episodes(self, edge: float, loadtest: bool) -> None:
         tr = self._track
-        cands = sorted([e for e in self._new_events if self._eligible(e)], key=lambda e: e.t0)
+        cands = sorted([e for e in self._new_events if self._eligible(e) and not self._in_link_down(e.t0)],
+                       key=lambda e: e.t0)
         for ev in cands:
             if tr is not None and not tr.closed:
                 if ev in tr.members:

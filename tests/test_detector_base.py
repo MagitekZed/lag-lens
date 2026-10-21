@@ -542,5 +542,47 @@ class EpisodeTests(DetectorBase):
         self.assertTrue(self.det.verdict_due)
 
 
+class LinkDownTests(DetectorBase):
+    """The probe computer's own link drops: sends fail on this computer, which is not the network's fault."""
+
+    def test_no_episodes_while_the_link_is_down(self):
+        s = self.s
+        down_from, seen_at, up_at = T0 + 60, T0 + 66, T0 + 300
+
+        def per(t):
+            if t >= seen_at - 1:
+                s.state.set_latest("iface", {"carrier": not (seen_at - 1 <= t < up_at)})
+            if down_from <= t < up_at + 5:
+                for key in ("gw4", "inet4_cf", "inet4_g"):
+                    s.emit(key, t + 0.5, error=65)
+
+        def up(t):
+            return not (down_from <= t < up_at + 5)
+
+        for t0, t1 in ((T0, down_from), (down_from, up_at + 5), (up_at + 5, up_at + 60)):
+            feed(s, self.det.step, t0, t1, keys=["gw4", "inet4_cf", "inet4_g"] if up(t0) else [], per_second=per)
+        self.assertEqual([e.id for e in s.episodes()], [])
+        links = s.events("link_down")
+        self.assertEqual(len(links), 1)
+        ev = links[0]
+        self.assertTrue(ev.stall)
+        self.assertLessEqual(ev.t0, down_from)
+        self.assertAlmostEqual(ev.t1, ev.peak["up_t"] + detmod.LINK_SETTLE_S, places=3)
+        self.assertGreaterEqual(ev.peak["up_t"], up_at)
+        self.assertIn("network link is down", ev.note)
+        from laglens.engine import verdict
+        lines = verdict.persistent_findings(s.ctx, [], s.state.now())
+        self.assertTrue(any("own network link was down 1 time (4 m" in line for line in lines), lines)
+
+    def test_an_episode_touching_the_outage_is_this_computers_link(self):
+        from laglens.engine import classify as classifymod
+        f = classifymod.Features()
+        f.link_event = f.link_down = True
+        r = classifymod.rule_probe_link(f)
+        self.assertTrue(r.ok)
+        self.assertEqual(r.confidence, 0.95)
+        self.assertIn("own network link was down", r.evidence[0])
+
+
 if __name__ == "__main__":
     unittest.main()

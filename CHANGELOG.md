@@ -3,6 +3,21 @@
 All notable changes to Lag Lens are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and versions follow SemVer.
 
+## [1.0.24] - 2026-10-21
+
+### Fixed
+- When this computer's own network link dropped (the cable or adapter disconnected), every send failed on
+  this computer, and once the gateway was paused each failed retry looked like "gateway fine, everything
+  past it dead": a 16-minute disconnect became 15 cable-line episodes in the verdict and the Comcast
+  evidence. The detector now opens a `link_down` span while the probe interface has no carrier (from the
+  last 10 s link poll before it was seen until 30 s after it is back, for DHCP and router adverts) and opens
+  no episode inside it. An episode that touches the span is "this computer's network link" (confidence
+  0.95), the status pill says "This computer's network link is down: not measuring", and the verdict says
+  how long the link was down.
+- The same disconnect raised a false "macOS blocked traffic to your local network" warning and paused the
+  gateway and the Xbox: the internet had answered a moment before the gateway was refused. A Local Network
+  block is now only diagnosed when the internet answers after the gateway sends started failing.
+
 ## [1.0.23] - 2026-10-20
 
 ### Changed

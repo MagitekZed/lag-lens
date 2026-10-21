@@ -266,6 +266,7 @@ class HostCollector:
         row["speed"] = link.get("speed")
         row["duplex"] = link.get("duplex")
         row["operstate"] = link.get("operstate")
+        row["carrier"] = link.get("carrier")
         return row
 
     def _link_step(self, now: float, iface: str) -> None:

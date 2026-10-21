@@ -56,8 +56,8 @@ DEPTH: Dict[str, int] = {k: i for i, level in enumerate(LADDER) for k in level}
 INTERNET_KEYS = ("inet4_cf", "inet4_g", "inet6_cf", "inet6_g")
 HOP_ROLES = ("isp_hop", "mid_hop")
 #: Event types that exonerate the host (SPEC §7.3).
-HOST_TAG_TYPES = ("host_stall", "monitor_gap", "wifi_drop", "wifi_roam", "iface_errors", "link_flap", "self_load",
-                  "vpn_route", "clock_jump")
+HOST_TAG_TYPES = ("host_stall", "monitor_gap", "wifi_drop", "wifi_roam", "iface_errors", "link_flap", "link_down",
+                  "self_load", "vpn_route", "clock_jump")
 #: Types whose overlap is measured as a share of the episode (the others count when they touch it).
 HOST_COVER_TYPES = ("host_stall", "monitor_gap")
 SYMPTOM_TYPES = ("latency_spike", "loss_burst", "late_burst", "jitter", "probe_error", "dns_slow", "dns_fail",
@@ -399,6 +399,7 @@ class Features:
         self.on_wifi = False
         self.wifi_event = False
         self.link_event = False
+        self.link_down = False  # this computer's link had no carrier (detector link_down span)
         self.loadtest = False
         self.xbox_state = "unknown"
         self.xbox_link_mbps: Optional[int] = None
@@ -670,8 +671,10 @@ def extract_features(ep: Episode, ctx: Any, now: Optional[float] = None) -> Feat
                 tags.append(e.type)
             if e.type in ("wifi_drop", "wifi_roam"):
                 f.wifi_event = True
-            if e.type in ("link_flap", "iface_errors"):
+            if e.type in ("link_flap", "iface_errors", "link_down"):
                 f.link_event = True
+            if e.type == "link_down":
+                f.link_down = True
     f.host_cover = (cover / f.dur) if f.dur > 0 else (1.0 if cover > 0 else 0.0)
     if f.host_cover <= 0.5:
         tags = [t for t in tags if t not in HOST_COVER_TYPES]
@@ -865,8 +868,11 @@ def rule_probe_link(f: Features) -> RuleResult:
     if r.failed:
         return r
     r.ok = True
-    r.confidence = 0.8
-    if f.link_event:
+    r.confidence = 0.95 if f.link_down else 0.8
+    if f.link_down:
+        r.evidence.append("this computer's own network link was down: the probes never left it")
+        r.signals.add("link")
+    elif f.link_event:
         r.evidence.append("link flap / interface errors on the probe host coincided with the episode")
         r.signals.add("link")
     if both_lost and gw is not None and xb is not None:
