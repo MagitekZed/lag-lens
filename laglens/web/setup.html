@@ -45,9 +45,6 @@
     <h2>Plex mode</h2>
     <div id="plex-now" class="muted">loading…</div>
     <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px">
-      <label><input id="plex-on" type="checkbox"> Watch the Plex server and its players</label>
-    </div>
-    <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
       <input id="plex-server" type="text" inputmode="decimal" placeholder="server IP (blank: find it on the LAN)" autocomplete="off" style="min-width:240px">
       <input id="plex-players" type="text" placeholder="players, e.g. 192.168.0.20=HTPC 192.168.0.30=PS5" autocomplete="off" style="min-width:320px">
     </div>
@@ -58,7 +55,8 @@
       <span id="plex-msg" class="small muted"></span>
     </div>
     <div class="hint" style="margin-top:8px">
-      Plex mode watches the Plex server (on its port 32400, which works even when Windows' firewall drops pings) and
+      Plex mode turns on by itself while the dashboard's <b>Now:</b> activity is <b>Plex</b>, and off when you pick
+      something else. It watches the Plex server (on its port 32400, which works even when Windows' firewall drops pings) and
       each player, and with a token reads what the server is doing: Direct Play or Transcode and its speed, CPU,
       background tasks and buffering. To find the token: open Plex in a browser, open any movie or episode, choose
       ⋯ → Get Info → View XML; the address of the page that opens ends in <code>X-Plex-Token=…</code>. Paste the part
@@ -122,14 +120,16 @@
     var now = $('plex-now'); LL.clear(now);
     p = p || {};
     var srv = p.server;
-    $('plex-on').checked = !!p.enabled;
+    now.appendChild(h('div', null, p.enabled ? h('b', null, 'Plex mode is on') : 'Plex mode is off',
+      p.enabled ? ' (the activity is Plex).' : ' — it turns on while the Now: activity is Plex.'));
     if (srv && typeof srv === 'object') {
       now.appendChild(h('div', null, 'Server ', h('b', null, srv.name || srv.ip), ' ', h('span', { class: 'mono' }, srv.ip + ':' + (srv.port || 32400)),
         ' · ', p.reachable === false ? h('b', { class: 'bad' }, 'not answering') : 'answering',
         ' · token ', p.token_set ? (p.token_rejected ? h('b', { class: 'bad' }, 'rejected') : 'saved') : h('b', null, 'not set')));
       if (!$('plex-server').value && srv.source === 'config') $('plex-server').value = srv.ip + (srv.port && srv.port !== 32400 ? ':' + srv.port : '');
     } else {
-      now.appendChild(h('div', null, p.enabled ? 'Looking for the Plex server…' : 'Plex mode is off.', p.reason ? h('span', { class: 'muted' }, ' — ' + p.reason) : null,
+      now.appendChild(h('div', null, p.enabled ? 'Looking for the Plex server…' : 'No server found yet.',
+        p.enabled && p.reason ? h('span', { class: 'muted' }, ' — ' + p.reason) : null,
         ' · token ', p.token_set ? 'saved' : h('b', null, 'not set')));
       if (!$('plex-server').value && typeof p.server === 'string') $('plex-server').value = p.server;
     }
@@ -145,14 +145,14 @@
 
   function savePlex(extra) {
     var msg = $('plex-msg');
-    var body = Object.assign({ enabled: $('plex-on').checked, server: ($('plex-server').value || '').trim(),
+    var body = Object.assign({ server: ($('plex-server').value || '').trim(),
       players: ($('plex-players').value || '').trim() }, extra || {});
     var tok = ($('plex-token').value || '').trim();
     if (tok && !body.clear_token) body.token = tok;
     msg.textContent = 'saving…';
     LL.api.post('/api/plex', body).then(function (r) {
       $('plex-token').value = '';  // never keep the token in the page
-      msg.textContent = (r.saved ? 'saved' : 'applied for this run') + (r.started ? ' · Plex mode started' : '') + (r.token_set ? ' · token saved' : ' · no token');
+      msg.textContent = (r.saved ? 'saved' : 'applied for this run') + (r.token_set ? ' · token saved' : ' · no token');
       LL.toast('Plex settings saved', 'ok');
       setTimeout(loadPlex, 1500);
     }).catch(function (e) { msg.textContent = e.message || 'failed'; LL.toast(e.message || 'failed', 'bad'); });

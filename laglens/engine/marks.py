@@ -181,7 +181,7 @@ def assess_window(state: State, t_est: float, before_s: float = ASSESS_BEFORE_S,
 def plex_context(state: State, t_est: float) -> str:
     """Plex mode: what the server reported around a press (notes, the stream's decision and speed, CPU, tasks)."""
     row = state.latest("plex")
-    if not row:
+    if not row or row.get("active") is False:
         return ""
     before, after = PLEX_NOTE_WINDOW
     with state.lock:

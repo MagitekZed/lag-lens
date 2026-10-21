@@ -81,7 +81,8 @@ Other optional settings: `targets.xbox_ip` (or choose the Xbox on `/setup`) to w
 ## Plex mode
 
 For stutter when streaming from a Plex server to a player at home (traffic that never passes this
-computer), start with `bash start.sh --plex`, or turn it on under **Setup → Plex mode**. Lag Lens then
+computer), pick **Plex** as the dashboard's **Now:** activity: Plex mode runs while the activity is
+Plex and stops when you pick something else (`bash start.sh --plex` starts on that activity). Lag Lens then
 finds the server on the LAN (or uses the IP you give it), watches it on its port 32400 (this works
 even when Windows' firewall drops pings) and watches each player, and a stutter press tells you which
 side dropped. With your Plex token it also reads what the server is doing: Direct Play or Transcode

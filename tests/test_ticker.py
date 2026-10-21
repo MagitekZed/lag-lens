@@ -135,7 +135,7 @@ class StatusTests(unittest.TestCase):
         st.set_collector("docsis", "disabled", reason="docsis.password not set")
         st.set_collector("wifi", "disabled", reason="wired interface")
         st.set_collector("notify", "disabled", reason="not configured")
-        st.set_collector("plex", "disabled", reason="off (start with --plex, or turn Plex mode on in Setup)")
+        st.set_collector("plex", "disabled", reason="off (turns on when the activity is Plex)")
         s.clock.set(T0 + 12)
         tk.tick(int(T0 + 12))
         self.assertEqual(st.status, STATUS_OK)

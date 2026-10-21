@@ -729,12 +729,12 @@ class MutatingEndpointTests(ServerBase):
         self.ctx.config_file = cfg_file
         tok = "fake-plex-token-123"  # made up
         self.assertEqual(self.jget("/api/plex")["enabled"], False)  # Plex mode off: a status, not an error
-        body = self.jpost("/api/plex", {"enabled": False, "server": "192.168.0.125", "players": "192.168.0.20=HTPC 192.168.0.30",
+        body = self.jpost("/api/plex", {"server": "192.168.0.125", "players": "192.168.0.20=HTPC 192.168.0.30",
                                         "token": tok})
         self.assertTrue(body["saved"] and body["token_set"])
         self.assertNotIn(tok, json.dumps(body))
         data = json.loads(cfg_file.read_text())
-        self.assertEqual(data["plex"], {"enabled": False, "server": "192.168.0.125", "players": ["192.168.0.20=HTPC", "192.168.0.30"],
+        self.assertEqual(data["plex"], {"server": "192.168.0.125", "players": ["192.168.0.20=HTPC", "192.168.0.30"],
                                         "token": tok})
         self.assertNotIn(tok, json.dumps(self.jget("/api/plex")))
         self.assertNotIn(tok, json.dumps(self.jget("/api/state")))

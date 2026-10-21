@@ -779,7 +779,8 @@ class Doctor:
             checks += self._safe(self.c_xbox, "xbox")
             checks += self._safe(self.c_xb7, "xb7_login")
             checks += self._safe(self.c_igd, "igd")
-            if (self.cfg.get("plex") or {}).get("enabled"):
+            pcfg = self.cfg.get("plex") or {}
+            if pcfg.get("token") or pcfg.get("server"):
                 checks += self._safe(self.c_plex, "plex")
         checks += self._safe(self.c_inhibitor, "sleep_inhibitor")
         if not fast:

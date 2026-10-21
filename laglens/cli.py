@@ -55,7 +55,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--no-docsis", action="store_true", help="disable the XB7 modem scraper")
     run.add_argument("--no-igd", action="store_true", help="disable the UPnP IGD collector")
     run.add_argument("--plex", action="store_true",
-                     help="Plex mode: also watch the Plex server and its players on the home network")
+                     help="start on the Plex activity (Plex mode watches the Plex server and its players until the activity changes)")
     run.add_argument("--resume", metavar="DIR", default=None, help="append to an existing session directory")
     return p
 

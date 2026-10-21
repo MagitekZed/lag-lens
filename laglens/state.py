@@ -978,9 +978,10 @@ class State:
 
     # ------------------------------------------------------------ snapshot
     def _activities(self) -> List[str]:
-        """The "Now:" choices; "plex" joins an older config's list while Plex mode runs."""
+        """The "Now:" choices; "plex" (which turns Plex mode on) joins an older config's list once Plex is set up."""
         acts = [str(a) for a in ((self.cfg or {}).get("activities") or []) if isinstance(a, str)]
-        if "plex" not in acts and self.latest("plex") is not None:
+        pcfg = (self.cfg or {}).get("plex") or {}
+        if "plex" not in acts and (self.latest("plex") is not None or pcfg.get("token") or pcfg.get("server")):
             acts.insert(max(0, len(acts) - 1) if acts and acts[-1] == "other" else len(acts), "plex")
         return acts
 

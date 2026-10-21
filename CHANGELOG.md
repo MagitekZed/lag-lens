@@ -3,6 +3,15 @@
 All notable changes to Lag Lens are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and versions follow SemVer.
 
+## [1.0.23] - 2026-10-20
+
+### Changed
+- Plex mode now follows the **Now:** activity instead of a saved switch: picking **Plex** turns it on
+  (the server and player probes and the server status), picking anything else turns it off and pauses the
+  Plex targets ("Plex mode off"). The Setup page keeps the server, players and token but no longer has the
+  on/off checkbox, and `plex.enabled` is gone from the config. `--plex` now starts the session on the Plex
+  activity. "Plex" joins an older config's activity list once a Plex server or token is set up.
+
 ## [1.0.22] - 2026-10-20
 
 ### Fixed

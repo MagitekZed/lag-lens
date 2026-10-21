@@ -1,4 +1,7 @@
-"""Plex mode: the Plex Media Server and its players on the home network (``--plex`` / ``plex.enabled``).
+"""Plex mode: the Plex Media Server and its players on the home network.
+
+Plex mode is on while the "Now:" activity is ``plex`` (``--plex`` starts the session on it) and off
+otherwise: the thread idles and the Plex targets are disabled ("Plex mode off").
 
 Lag Lens normally looks outward (gateway → Comcast → internet). A Plex stream between two devices at
 home never passes this computer, so this collector watches both ends instead and asks the server what
@@ -55,6 +58,8 @@ CPU_POLLS = 2
 STORE_IDLE_S = 60.0
 CLIENT_ID = "laglens"
 TOKEN_REJECTED = "Plex rejected the token (check plex.token on the Setup page)"
+#: Plex mode follows the "Now:" activity; this is the collector's reason while it is something else.
+OFF_REASON = "off (turns on when the activity is Plex)"
 NO_TOKEN = "no Plex token: server status (transcoding, CPU, buffering) is off; probes still run"
 
 
@@ -288,6 +293,10 @@ class PlexCollector:
         self._cpu_noted = False
         self._seen_activities: Dict[str, bool] = {}
         self._last_store: Optional[float] = None
+        #: Built on (direct use, tests, the doctor); :meth:`start` makes it follow the activity.
+        self.active = True
+        self._want: Optional[bool] = None
+        self._unsub: Optional[Callable[[], None]] = None
 
     # --------------------------------------------------------------- config
     def _pcfg(self) -> Dict[str, Any]:
@@ -307,15 +316,67 @@ class PlexCollector:
 
     # ------------------------------------------------------------ lifecycle
     def start(self) -> None:
+        """Run the thread; Plex mode is on while the "Now:" activity is Plex and off otherwise."""
         self.state.set_collector(self.name, "ok", reason="looking for the Plex server")
+        try:
+            self._unsub = self.state.subscribe(self._on_publish)
+        except Exception:  # noqa: BLE001
+            log.exception("plex: cannot follow the activity")
+        current = (getattr(self.state, "activity", None) or {}).get("current")
+        self.set_active(current == "plex")
+        self._apply_mode()
         th = threading.Thread(target=self._loop, name=self.name, daemon=True)
         self.thread = th
         th.start()
 
     def stop(self, timeout: float = 2.0) -> None:
+        if self._unsub is not None:
+            try:
+                self._unsub()
+            except Exception:  # noqa: BLE001
+                pass
+            self._unsub = None
         t = self.thread
         if t is not None:
             t.join(timeout)
+
+    def _on_publish(self, name: str, obj: Any) -> None:
+        if name == "activity" and isinstance(obj, dict):
+            self.set_active(obj.get("current") == "plex")
+
+    def set_active(self, on: bool) -> None:
+        """Ask for Plex mode on/off; the collector thread applies it before its next step (no race with a poll)."""
+        self._want = bool(on)
+
+    def _apply_mode(self) -> None:
+        want = self._want
+        if want is None or want == self.active:
+            return
+        self._want = None
+        if want:
+            with self.lock:
+                self.active = True
+                # look again: the Setup page may have changed the server, and the old one may be gone
+                self.server, self.reachable, self._last_ok, self._offline_noted = None, None, None, False
+                self._next_discover = self._next_poll = None
+                for p in self.players.values():
+                    p["checked"] = None  # re-probed (and re-enabled) on the first poll
+            self.state.set_collector(self.name, "ok", reason="looking for the Plex server")
+            log.info("plex: Plex mode on (activity is Plex)")
+            return
+        with self.lock:
+            self.active = False
+            self.sessions, self.resources, self.activities = [], None, []
+            keys = ["plex_srv"] + [p["key"] for p in self.players.values()]
+            known = self.server is not None
+        for key in keys:
+            t = self.state.target(key)
+            if t is not None and t.enabled:
+                self.state.set_target_state(key, enabled=False, reason="Plex mode off")
+        self.state.set_collector(self.name, "disabled", reason=OFF_REASON)
+        if known or self.state.latest("plex") is not None:
+            self._publish(self._clock())
+            log.info("plex: Plex mode off")
 
     def _loop(self) -> None:
         st = self.state
@@ -416,6 +477,9 @@ class PlexCollector:
 
     # ------------------------------------------------------------------ step
     def step(self, now: Optional[float] = None) -> None:
+        self._apply_mode()
+        if not self.active:
+            return
         now = self._clock() if now is None else now
         mono = self._mono()
         if self.server is None:
@@ -632,6 +696,7 @@ class PlexCollector:
         srv = dict(self.server) if self.server else None
         return {
             "t": round(now, 3),
+            "active": self.active,
             "server": srv,
             "reachable": self.reachable,
             "token_set": bool(self._token()),  # never the token itself
@@ -659,7 +724,7 @@ class PlexCollector:
 
     def status(self) -> Dict[str, Any]:
         row = self._row(self._clock())
-        row.update({"enabled": True, "reason": self.reason, "last_error": self.last_error,
+        row.update({"enabled": self.active, "reason": self.reason if self.active else OFF_REASON, "last_error": self.last_error,
                     "token_rejected": self._token_rejected is not None and self._token_rejected == self._token()})
         return row
 

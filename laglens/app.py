@@ -140,8 +140,6 @@ class AppContext:
         if name == "notify":
             n = self.cfg.get("notify", {})
             return bool(n.get("ntfy_topic") or n.get("webhook_url"))
-        if name == "plex":
-            return bool(getattr(a, "plex", False)) or bool((self.cfg.get("plex") or {}).get("enabled"))
         return True
 
 
@@ -166,8 +164,6 @@ def load_app_config(args: argparse.Namespace, create: bool = True) -> dict:
         overrides["targets.xbox_ip"] = args.xbox
     if getattr(args, "no_browser", False):
         overrides["open_browser"] = False
-    if getattr(args, "plex", False):
-        overrides["plex.enabled"] = True
     return configmod.load_config(path, overrides)
 
 
@@ -518,7 +514,6 @@ def _start_components(ctx: AppContext, components: List[Tuple[str, str, str, str
                 "docsis": "docsis.password not set" if not getattr(ctx.args, "no_docsis", False) else "disabled by --no-docsis",
                 "igd": "disabled by --no-igd" if getattr(ctx.args, "no_igd", False) else "igd.enabled is false",
                 "notify": "not configured",
-                "plex": "off (start with --plex, or turn Plex mode on in Setup)",
             }.get(name, "disabled in config")
             st.set_collector(name, "disabled", reason=reason)
             continue
@@ -613,6 +608,18 @@ def _install_signal_handlers(state: State) -> bool:
         return True
     except ValueError:  # not in the main thread (tests)
         return False
+
+
+def _set_activity(ctx: AppContext, activity: str, source: str) -> None:
+    """Switch the "Now:" activity and record the tag (as ``POST /api/activity`` does)."""
+    st = ctx.state
+    snap = st.set_activity(activity, source=source)
+    try:
+        with st.lock:
+            tag = dict(st.tags[-1]) if st.tags else {"t0": snap["since"], "t1": None, "activity": activity, "source": source}
+        ctx.store.append_json("tags", tag)
+    except Exception:  # noqa: BLE001
+        log.debug("cannot append tag", exc_info=True)
 
 
 def _lan_urls(ctx: AppContext) -> List[str]:
@@ -992,6 +999,8 @@ def run(
     # share one instance (the server would otherwise build its own lazily)
     _mark_service(ctx)
     _start_components(ctx, components if components is not None else COMPONENTS)
+    if getattr(args, "plex", False):
+        _set_activity(ctx, "plex", "cli")  # Plex mode follows the activity
     ctx.urls = _lan_urls(ctx)
     if terminal_marks:
         ctx.terminal_marks = _terminal_marks(ctx)

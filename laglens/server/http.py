@@ -831,14 +831,12 @@ class LagLensHandler(BaseHTTPRequestHandler):
         return self._json(col.status())
 
     def h_plex_set(self, m: Any) -> Response:
-        """Setup page: Plex mode on/off, server, players and the token (write-only: never sent back)."""
+        """Setup page: server, players and the token (write-only: never sent back). Plex mode follows the activity."""
         self.require_auth()
         body = self.body()
         ctx = self.sc.ctx
         pcfg = ctx.cfg.setdefault("plex", {}) if isinstance(ctx.cfg, dict) else {}
         values: Dict[str, Any] = {}
-        if "enabled" in body:
-            values["plex.enabled"] = _bool(body.get("enabled"))
         if "server" in body:
             srv = str(body.get("server") or "").strip()
             host = srv.rsplit(":", 1)[0] if srv.count(":") == 1 else srv
@@ -870,19 +868,9 @@ class LagLensHandler(BaseHTTPRequestHandler):
         for dotted, v in values.items():
             pcfg[dotted.split(".", 1)[1]] = v
         saved = self._persist_config(values) if values else False
-        started = False
-        if pcfg.get("enabled") and ctx.component("plex") is None:
-            mod = _import("laglens.collectors.plex")
-            if mod is not None:
-                try:
-                    col = mod.PlexCollector(ctx)
-                    col.start()
-                    ctx.components["plex"] = col
-                    started = True
-                except Exception:  # noqa: BLE001
-                    log.exception("cannot start Plex mode")
-        return self._json({"ok": True, "saved": saved, "started": started, "token_set": bool(pcfg.get("token")),
-                           "enabled": bool(pcfg.get("enabled")) or ctx.component("plex") is not None})
+        col = ctx.component("plex")
+        return self._json({"ok": True, "saved": saved, "token_set": bool(pcfg.get("token")),
+                           "enabled": bool(getattr(col, "active", False))})
 
     def h_igd(self, m: Any) -> Response:
         col = self.sc.component("igd")

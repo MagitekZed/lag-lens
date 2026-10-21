@@ -88,7 +88,7 @@ class Store:
 
 class Ctx:
     def __init__(self, token=TOKEN, players=None):
-        self.cfg = {"rate_hz": 4, "plex": {"enabled": True, "server": "192.168.0.125", "token": token,
+        self.cfg = {"rate_hz": 4, "plex": {"server": "192.168.0.125", "token": token,
                                            "players": players or [], "interval_s": 5}}
         self.state = State(cfg=self.cfg)
         self.store = Store()
@@ -345,6 +345,69 @@ class PressAndVerdictTests(unittest.TestCase):
         self.assertNotIn("plex", st._activities())
         st.set_latest("plex", {"token_set": False})
         self.assertEqual(st._activities(), ["idle", "bf6", "plex", "other"])
+        # an older activity list still gets Plex once a server or token is set up
+        st = State(cfg={"activities": ["idle", "other"], "plex": {"server": "192.168.0.125"}})
+        self.assertEqual(st._activities(), ["idle", "plex", "other"])
+
+
+class ModeTests(unittest.TestCase):
+    """Plex mode follows the "Now:" activity instead of a saved switch."""
+
+    def test_on_only_while_the_activity_is_plex(self):
+        ctx, clk, srv, col = make()
+        ctx.state.subscribe(col._on_publish)
+        ctx.state.set_activity("idle")
+        col.step()
+        self.assertFalse(col.active)
+        self.assertEqual(srv.calls, [])  # off: no discovery, no polls
+        self.assertIsNone(ctx.state.target("plex_srv"))
+        self.assertEqual(ctx.state.collector("plex")["reason"], px.OFF_REASON)
+        self.assertIsNone(ctx.state.latest("plex"))  # never used: nothing for the verdict to mention
+        ctx.state.set_activity("plex")
+        col.step()
+        self.assertTrue(col.active and col.status()["enabled"])
+        self.assertTrue(ctx.state.target("plex_srv").enabled)
+        self.assertTrue(ctx.state.target("plex_player_0").enabled)
+        ctx.state.set_activity("rocket_league")
+        col.step()
+        self.assertFalse(ctx.state.target("plex_srv").enabled)
+        self.assertEqual(ctx.state.target("plex_srv").reason, "Plex mode off")
+        self.assertFalse(ctx.state.target("plex_player_0").enabled)
+        st = col.status()
+        self.assertFalse(st["enabled"])
+        self.assertEqual((st["reason"], st["sessions"]), (px.OFF_REASON, []))
+        self.assertIs(ctx.state.latest("plex")["active"], False)
+        self.assertEqual(ctx.state.collector("plex")["status"], "disabled")
+        n = len(srv.calls)
+        clk.tick(60)
+        col.step()
+        self.assertEqual(len(srv.calls), n)
+        ctx.state.set_activity("plex")
+        clk.tick(1)
+        col.step()
+        self.assertTrue(ctx.state.target("plex_srv").enabled)
+        self.assertTrue(ctx.state.target("plex_player_0").enabled)  # re-probed on the first poll
+        self.assertGreater(len(srv.calls), n)
+
+    def test_start_follows_the_current_activity(self):
+        ctx, clk, srv, col = make()
+        col.start()
+        self.addCleanup(col.stop, 2.0)
+        self.addCleanup(ctx.state.stop_event.set)
+        self.assertFalse(col.active)
+        self.assertEqual(ctx.state.collector("plex")["status"], "disabled")
+        # a press while Plex mode is off carries no stale Plex context
+        ctx.state.set_latest("plex", {"active": False, "token_set": True, "sessions": [{"state": "playing"}]})
+        from laglens.engine import marks
+        self.assertEqual(marks.plex_context(ctx.state, T0), "")
+
+    def test_cli_flag_starts_on_the_plex_activity(self):
+        from laglens import app
+        ctx = Ctx()
+        app._set_activity(ctx, "plex", "cli")
+        self.assertEqual(ctx.state.activity["current"], "plex")
+        self.assertEqual(ctx.store.rows[-1][0], "tags")
+        self.assertEqual(ctx.store.rows[-1][1]["activity"], "plex")
 
 
 if __name__ == "__main__":
