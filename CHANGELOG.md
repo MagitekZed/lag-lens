@@ -3,6 +3,22 @@
 All notable changes to Lag Lens are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/) and versions follow SemVer.
 
+## [1.0.25] - 2026-10-22
+
+### Changed
+- `comcast_evidence.txt` shows how bad each episode was, not only its packet loss (often 0% when the
+  trouble is delay): new `hop ms` and `inet ms` columns give the round trip during the episode as p95/max,
+  a "Normal round trip (session median)" line gives the router, Comcast hop and internet values to compare
+  with, and the request names the worst Comcast-hop round trip. Old episodes are read from the 1 s rollups
+  (2 h) or from their evidence lines, which now end in "(p95 N ms, max N ms)".
+
+### Fixed
+- An episode's "normal" was the 10 minutes before it, earlier episodes included, so after a long bad
+  stretch the next episode's added delay read small or negative ("-109 ms" right after a 10-minute
+  episode). Earlier episodes are now left out of that window, and of the detector's rolling baseline, as
+  long as 30 s of quiet samples remain (looking back over the whole 15-minute raw ring if needed);
+  otherwise the plain window is used, so a lasting change is still learned.
+
 ## [1.0.24] - 2026-10-21
 
 ### Fixed

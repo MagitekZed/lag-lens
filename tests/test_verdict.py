@@ -249,7 +249,7 @@ class ComcastTextTests(unittest.TestCase):
                                    "| Probe host: mac (en0 1000 Mb/s full (Wi-Fi))")
         self.assertIn("Episodes pointing at Comcast's side (local time): 1", text)
         header = [ln for ln in lines if ln.startswith("time ")][0]
-        for col in ("dur", "class", "gw loss", "Comcast hop", "internet", "direction", "DOCSIS"):
+        for col in ("dur", "class", "gw loss", "hop loss", "hop ms", "inet loss", "inet ms", "direction", "DOCSIS"):
             self.assertIn(col, header)
         row = [ln for ln in lines if "docsis_access/t3_signature" in ln][0]
         self.assertIn(time.strftime("%H:%M:%S", time.localtime(T0 + 48)), row)
@@ -283,10 +283,12 @@ class ComcastTextTests(unittest.TestCase):
         text = vm.comcast_text(s.ctx, now=T0 + 100)
         row = [ln for ln in text.splitlines() if "docsis_access" in ln][0]
         cols = row.split()
-        # time dur(2 tokens) class gw hop internet direction docsis
+        # time dur(2 tokens) class gw-loss hop-loss hop-ms inet-loss inet-ms direction docsis
         self.assertEqual(cols[4], "0%")
         self.assertGreaterEqual(int(cols[5].rstrip("%")), 90)  # 2 Hz hop: 10 of 11 samples in the window
-        self.assertGreaterEqual(int(cols[6].rstrip("%")), 90)
+        self.assertRegex(cols[6], r"^\d+/\d+$")  # p95/max of the replies that did come back
+        self.assertGreaterEqual(int(cols[7].rstrip("%")), 90)
+        self.assertRegex(text, r"Normal round trip \(session median\): gateway [\d.]+ ms, Comcast hop [\d.]+ ms, internet [\d.]+ ms")
 
     def test_ipv6_evidence_lines_and_an_ipv6_only_comcast_hop(self):
         # an older episode (no raw samples left) is read back from its evidence lines, whose IPv6 labels contain
@@ -296,12 +298,14 @@ class ComcastTextTests(unittest.TestCase):
         s.state.add_target(Target(id=-1, key="isp_hop6", role="isp_hop", addr="2001:558:aaaa:cccc::3", family=6,
                                   kind=KIND_ICMP, label="isp_hop6", rate_hz=2.0))
         s.state.episodes.append(ep("ep-1", T0 + 40, 5, "upstream_delay", direction="upstream", evidence=[
-            "gateway 10.0.0.1: 0% loss, +0 ms", "Comcast hop 2001:558:aaaa:cccc::3: 4% loss, +23 ms",
-            "1.1.1.1: 0% loss, +22 ms", "8.8.8.8: 0% loss, +22 ms",
+            "gateway 10.0.0.1: 0% loss, +0 ms", "Comcast hop 2001:558:aaaa:cccc::3: 4% loss, +93 ms (p95 142 ms, max 389 ms)",
+            "1.1.1.1: 0% loss, +22 ms (p95 40 ms, max 466 ms)", "8.8.8.8: 0% loss, +22 ms (p95 51 ms, max 300 ms)",
             "2606:4700:4700::1111: 2% loss, +11 ms", "2001:4860:4860::8888: 6% loss, +12 ms"]))
         text = vm.comcast_text(s.ctx, now=T0 + 100, write=False)
         row = [ln for ln in text.splitlines() if "upstream_delay" in ln][0]
-        self.assertEqual(row.split()[4:7], ["0%", "4%", "2%"])  # gw, Comcast hop (IPv6), internet mean
+        cols = row.split()
+        self.assertEqual(cols[4:9], ["0%", "4%", "142/389", "2%", "51/466"])  # gw, hop (IPv6), its delay, internet
+        self.assertIn("The first Comcast hop reached 389 ms", text)
 
 
     def test_behind_a_router_of_the_users_own(self):

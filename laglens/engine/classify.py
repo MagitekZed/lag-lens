@@ -38,6 +38,7 @@ from laglens.state import (
     F_XBOX_ASLEEP,
     KIND_ICMP_BIG,
     MATRIX_MAX_ID,
+    RAW_RING_S,
     Episode,
     Event,
     Sample,
@@ -76,6 +77,9 @@ LAN_ROLES = ("gateway", "xbox", "plex_server", "plex_player")
 PLEX_ROLES = ("plex_server", "plex_player")
 DEFAULT_FLOOR = 30.0
 CLEAN_LOSS_PCT = 2.0
+#: "Normal" before an episode leaves out earlier episodes when this much quiet time is left (else the
+#: plain window, so that a lasting change is learned).
+BASELINE_QUIET_MIN_S = 30.0
 AFFECTED_LOSS_PCT = 10.0
 MAX_MATRIX_SLOTS = 2400  # 10 min
 
@@ -380,7 +384,10 @@ class TargetView:
             return "%s: no samples" % label_of(self.target)
         if self.p95 is None:
             return "%s: %s loss, no replies" % (label_of(self.target), _fmt_pct(lp))
-        return "%s: %s loss, %s" % (label_of(self.target), _fmt_pct(lp), _fmt_ms(self.d_p95))
+        out = "%s: %s loss, %s" % (label_of(self.target), _fmt_pct(lp), _fmt_ms(self.d_p95))
+        if self.max is not None:
+            out += " (p95 %d ms, max %d ms)" % (int(round(self.p95)), int(round(self.max)))
+        return out
 
 
 class Features:
@@ -454,6 +461,46 @@ class Features:
         if v is None or not v.known:
             return None
         return v.clean
+
+
+def episode_spans(state: State, t_from: float, t_to: float, now: Optional[float] = None) -> List[Tuple[int, int]]:
+    """``(from_ms, to_ms)`` of the episodes overlapping ``[t_from, t_to]`` (an open one runs to ``now``)."""
+    now = state.now() if now is None else now
+    with state.lock:
+        eps = list(state.episodes)
+    out = []
+    for e in eps:
+        t1 = e.t1 if e.t1 is not None else now
+        if t1 >= t_from and e.t0 <= t_to:
+            out.append((int(e.t0 * 1000), int(t1 * 1000)))
+    return out
+
+
+def quiet_baseline(state: State, target: Target, t: float, span_s: float = 600.0,
+                   now: Optional[float] = None, window: Optional[List[Sample]] = None) -> List[Sample]:
+    """The ``span_s`` of raw samples before ``t`` that describe "normal": earlier episodes cut out.
+
+    A long bad stretch would otherwise become the baseline, and the next episode's delay would read
+    as small or even negative (a 10 min episode split in two: "-109 ms" for the second half). Too little
+    quiet time in ``span_s`` → look back over the whole raw ring; less than
+    :data:`BASELINE_QUIET_MIN_S` of quiet samples even there → the plain window.
+    """
+    if window is None:
+        window = state.raw_window(target.id, t - span_s, t)
+    if not window:
+        return window
+    need = max(5, int(BASELINE_QUIET_MIN_S * float(target.rate_hz or 1.0)))
+    for span in (span_s, max(span_s, float(RAW_RING_S))):
+        samples = window if span == span_s else state.raw_window(target.id, t - span, t)
+        spans = episode_spans(state, t - span, t, now)
+        if not spans:
+            return samples
+        quiet = [s for s in samples if not any(a <= s.ts_ms <= b for a, b in spans)]
+        if len(quiet) >= need:
+            return quiet
+        if span >= RAW_RING_S:
+            break
+    return window
 
 
 def _baseline(samples: Iterable[Sample]) -> Tuple[Optional[float], Optional[float], Optional[float]]:
@@ -629,7 +676,7 @@ def extract_features(ep: Episode, ctx: Any, now: Optional[float] = None) -> Feat
             continue
         view = TargetView(t)
         samples = state.raw_window(t.id, f.t0, f.t1 + 0.25)
-        baseline = state.raw_window(t.id, f.t0 - 600, f.t0)
+        baseline = quiet_baseline(state, t, f.t0, now=now)
         if t.role == "xbox" and xbox_info.get("since"):
             cut = float(xbox_info["since"]) * 1000.0  # samples of the previous address do not describe this console
             samples = [s for s in samples if s.ts_ms >= cut]

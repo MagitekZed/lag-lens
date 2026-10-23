@@ -542,6 +542,32 @@ class EpisodeTests(DetectorBase):
         self.assertTrue(self.det.verdict_due)
 
 
+class QuietBaselineTests(DetectorBase):
+    """"Normal" before an episode leaves out the earlier episodes (2026-10-22: "-109 ms" after a long one)."""
+
+    def test_a_long_bad_stretch_does_not_become_normal(self):
+        from laglens.engine import classify as classifymod
+        from laglens.engine.rollup import percentile
+        from laglens.state import Episode
+        s = self.s
+        bad = lambda key, ts, base: 150.0 if ts >= T0 + 250 else base  # noqa: E731
+        s.stream(T0, T0 + 910, keys=["inet4_cf"], rtt=bad)
+        # a 10 min episode split in two at its maximum length, as the detector does
+        s.state.episodes.append(Episode(id="ep-000001", t0=T0 + 250, t1=T0 + 300, cls="docsis_access"))
+        s.state.episodes.append(Episode(id="ep-000002", t0=T0 + 300, t1=T0 + 900, cls="docsis_access"))
+        t = s.state.target("inet4_cf")
+        base = classifymod.quiet_baseline(s.state, t, T0 + 900, now=T0 + 910)
+        self.assertTrue(base and all(x.ts_ms < (T0 + 250) * 1000 for x in base))
+        self.assertLess(percentile(sorted(x.value / 1000.0 for x in base), 95), 40.0)
+        # the detector's own baseline follows the same rule
+        b = detmod.baseline_for(s.state, t.id, T0 + 900)
+        self.assertLess(b.p50, 40.0)
+        # all trouble and no quiet time anywhere in the ring: the plain window (a lasting change is learned)
+        s.state.episodes.insert(0, Episode(id="ep-000000", t0=T0 - 100, t1=T0 + 250, cls="docsis_access"))
+        self.assertEqual(len(classifymod.quiet_baseline(s.state, t, T0 + 900, now=T0 + 910)),
+                         len(s.state.raw_window(t.id, T0 + 300, T0 + 900)))
+
+
 class LinkDownTests(DetectorBase):
     """The probe computer's own link drops: sends fail on this computer, which is not the network's fault."""
 

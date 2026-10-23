@@ -16,9 +16,10 @@
 import logging
 import re
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from laglens.engine.classify import COMCAST_HOP_KEYS, confidence_band, label_of
+from laglens.engine.rollup import percentile
 from laglens.state import Episode, State
 
 log = logging.getLogger("laglens.verdict")
@@ -630,6 +631,8 @@ def truncate_prefix(prefix: Optional[str]) -> Optional[str]:
 
 
 _EVIDENCE_LOSS_RX = re.compile(r"\s*(\d+(?:\.\d+)?)% loss")
+_EVIDENCE_DELAY_RX = re.compile(r"\(p95 (\d+) ms, max (\d+) ms\)")
+INET_KEYS = ("inet4_cf", "inet4_g", "inet6_cf", "inet6_g")
 
 
 def _loss_pct_for(state: State, ep: Episode, key: str, now: float) -> Optional[float]:
@@ -648,6 +651,58 @@ def _loss_pct_for(state: State, ep: Episode, key: str, now: float) -> Optional[f
                 return float(m.group(1)) if m else None
         return None
     return 100.0 * sum(1 for s in samples if s.lost) / len(samples)
+
+
+def _delay_for(state: State, ep: Episode, key: str, now: float) -> Optional[Tuple[float, float]]:
+    """``(p95, max)`` ms of ``key`` during ``ep``: raw samples (15 min ring), else the 1 s rollups (2 h; p95 of
+    the per-second p95s), else the episode's evidence line."""
+    t = state.target(key)
+    if t is None:
+        return None
+    t1 = ep.t1 if ep.t1 is not None else now
+    rtts = sorted(s.value / 1000.0 for s in state.raw_window(t.id, ep.t0, t1 + 0.25) if s.received)
+    if rtts:
+        return percentile(rtts, 95) or rtts[-1], rtts[-1]
+    rl = [r for r in state.rollups(1, ep.t0, t1 + 1, [t.id]).get(t.id, []) if r.max is not None]
+    if rl:
+        p95s = sorted(r.p95 if r.p95 is not None else r.max for r in rl)
+        return percentile(p95s, 95) or p95s[-1], max(r.max for r in rl)
+    label = label_of(t) + ":"
+    for line in ep.evidence:
+        if line.startswith(label):
+            m = _EVIDENCE_DELAY_RX.search(line[len(label):])
+            return (float(m.group(1)), float(m.group(2))) if m else None
+    return None
+
+
+def _worst_delay(state: State, ep: Episode, keys: Sequence[str], now: float, first: bool = False) -> Optional[Tuple[float, float]]:
+    """The worst ``(p95, max)`` over ``keys`` (``first``: the first key that has one, as for the Comcast hop)."""
+    found = []
+    for k in keys:
+        d = _delay_for(state, ep, k, now)
+        if d is not None:
+            if first:
+                return d
+            found.append(d)
+    return (max(d[0] for d in found), max(d[1] for d in found)) if found else None
+
+
+def _normal_ms(state: State, keys: Sequence[str]) -> Optional[float]:
+    """Session median RTT of the first of ``keys`` that has replies (a few episodes barely move a median)."""
+    for k in keys:
+        t = state.target(k)
+        if t is None:
+            continue
+        with state.lock:
+            tot = state.totals.get(t.id)
+            rtts = sorted(tot.rtts_us) if tot is not None else []
+        if rtts:
+            return rtts[len(rtts) // 2] / 1000.0
+    return None
+
+
+def _fmt_delay(d: Optional[Tuple[float, float]]) -> str:
+    return "n/a" if d is None else "%d/%d" % (int(round(d[0])), int(round(d[1])))
 
 
 def _docsis_corr(ep: Episode) -> str:
@@ -714,9 +769,16 @@ def comcast_text(ctx: Any, now: Optional[float] = None, episodes: Optional[List[
         if left_out:
             lines.append("(%d other episode%s left out: this home's equipment, a single far-away destination, or unclear)"
                          % (left_out, "" if left_out == 1 else "s"))
-        lines.append("%-9s %-8s %-26s %-8s %-12s %-9s %-10s %s" % (
-            "time", "dur", "class", "gw loss", "Comcast hop", "internet", "direction", "DOCSIS"))
+        norm = [(name, _normal_ms(state, keys)) for name, keys in (
+            ("gateway" if is_modem else "router", ("gw4",)), ("Comcast hop", COMCAST_HOP_KEYS), ("internet", INET_KEYS))]
+        if any(v is not None for _n, v in norm):
+            lines.append("Normal round trip (session median): %s" % ", ".join(
+                "%s %s" % (n, "n/a" if v is None else "%.0f ms" % v if v >= 10 else "%.1f ms" % v) for n, v in norm))
+        lines.append("Delay columns: round trip in ms during the episode, p95/max (the worst 5% of replies / the worst one).")
+        lines.append("%-9s %-8s %-26s %-8s %-9s %-14s %-9s %-14s %-10s %s" % (
+            "time", "dur", "class", "gw loss", "hop loss", "hop ms", "inet loss", "inet ms", "direction", "DOCSIS"))
         total_s = 0.0
+        hop_peak = 0.0
         any_loss = False  # did any relevant episode lose packets past the gateway (vs. latency only)?
         for e in relevant[-200:]:
             t1 = e.t1 if e.t1 is not None else now
@@ -730,12 +792,16 @@ def comcast_text(ctx: Any, now: Optional[float] = None, episodes: Optional[List[
             inet_loss = (sum(inet) / len(inet)) if inet else None
             if (hop_loss or 0) > 0 or (inet_loss or 0) > 0:
                 any_loss = True
+            hop_d = _worst_delay(state, e, COMCAST_HOP_KEYS, now, first=True)
+            inet_d = _worst_delay(state, e, INET_KEYS, now)
+            if hop_d is not None:
+                hop_peak = max(hop_peak, hop_d[1])
             cls = e.cls + ("/" + e.subclass if e.subclass else "")
-            lines.append("%-9s %-8s %-26s %-8s %-12s %-9s %-10s %s" % (
+            lines.append("%-9s %-8s %-26s %-8s %-9s %-14s %-9s %-14s %-10s %s" % (
                 local_hms(e.t0), fmt_seconds(dur), cls[:26],
                 "n/a" if gw_loss is None else "%d%%" % int(round(gw_loss)),
-                "n/a" if hop_loss is None else "%d%%" % int(round(hop_loss)),
-                "n/a" if inet_loss is None else "%d%%" % int(round(inet_loss)),
+                "n/a" if hop_loss is None else "%d%%" % int(round(hop_loss)), _fmt_delay(hop_d),
+                "n/a" if inet_loss is None else "%d%%" % int(round(inet_loss)), _fmt_delay(inet_d),
                 e.direction or "n/a", _docsis_corr(e)))
         lines.append("")
         with state.lock:
@@ -767,11 +833,16 @@ def comcast_text(ctx: Any, now: Optional[float] = None, episodes: Optional[List[
                     else "slowed down at the same moments (latency rose, no packets were lost)")
             up = sum(1 for e in relevant if e.direction == "upstream")
             direction = (" The extra delay was in the upload direction in %d of them." % up) if up * 2 > len(relevant) else ""
+            hop_norm = norm[1][1]
+            peak = ""
+            if hop_peak:
+                peak = " The first Comcast hop reached %d ms%s." % (
+                    int(round(hop_peak)), " (normally %.0f ms)" % hop_norm if hop_norm else "")
             lines.append("Request: in these %d episode%s (%s in total) the %s answered normally while the first Comcast hop "
-                         "and the internet targets %s.%s Please check the upstream SNR/power at "
+                         "and the internet targets %s.%s%s Please check the upstream SNR/power at "
                          "the CMTS for this modem, its T3 timeouts and the node utilization 19:00–23:00." % (
                              len(relevant), "" if len(relevant) == 1 else "s", fmt_seconds(total_s),
-                             "gateway" if is_modem else "customer router and the modem", what, direction))
+                             "gateway" if is_modem else "customer router and the modem", what, peak, direction))
         else:
             lines.append("Request: no Comcast-side episode recorded yet; keep this file for reference.")
         text = "\n".join(lines) + "\n"

@@ -150,10 +150,16 @@ def baseline_from_samples(samples: Sequence[Sample], jitters: Sequence[float] = 
 
 
 def baseline_for(state: State, tid: int, t: float, span_s: float = 600.0) -> Baseline:
-    """Baseline of target ``tid`` over the ``span_s`` before ``t`` (raw ring + 1 s rollups)."""
-    samples = state.raw_window(tid, t - span_s, t)
-    rl = state.rollups(1, t - span_s, t, [tid]).get(tid, [])
-    jitters = [r.jit for r in rl if r.jit is not None]
+    """Baseline of target ``tid`` over the ``span_s`` before ``t`` (raw ring + 1 s rollups), earlier episodes
+    left out (:func:`laglens.engine.classify.quiet_baseline`) so a bad stretch does not raise "normal"."""
+    window = state.raw_window(tid, t - span_s, t)
+    target = state.target_by_id(tid)
+    samples = classifymod.quiet_baseline(state, target, t, span_s, window=window) if target is not None else window
+    if len(samples) < len(window):
+        jitters: List[float] = []  # the rollups include the episodes: per-second jitter from the quiet samples
+    else:
+        rl = state.rollups(1, t - span_s, t, [tid]).get(tid, [])
+        jitters = [r.jit for r in rl if r.jit is not None]
     if not jitters and samples:
         # no 1 s rollups yet (bare detector, offline rebuild): per-second jitter straight from the raw ring
         by_sec: Dict[int, List[float]] = {}
